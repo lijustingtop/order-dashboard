@@ -7,6 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "server": "node server.js",
     "start": "node server.js",
+    "prebuild": "node scripts/generate-data-manifest.js",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0"
   },

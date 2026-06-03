@@ -326,6 +326,8 @@ const shareBy = ref("units");
 const shareCanvas = ref(null);
 const trendCanvas = ref(null);
 const modelChips = ["GTi15", "GTi14", "SER9", "SER8", "EQ14", "EQi13", "ME Pro", "Dock"];
+const staticBase = import.meta.env.BASE_URL;
+const dataMode = ref("api");
 
 onMounted(refreshFiles);
 
@@ -392,8 +394,7 @@ watch([marketShare, shareBy, shareCanvas], () => nextTick(drawShareChart), { dee
 watch([trendPoints, trendCanvas], () => nextTick(drawTrendChart), { deep: true });
 
 async function refreshFiles() {
-  const response = await fetch("/api/files");
-  const payload = await response.json();
+  const payload = await loadFileManifest();
   orderFiles.value = payload.orders;
   inventoryFiles.value = payload.inventory;
   ordersDir.value = payload.ordersDir;
@@ -403,7 +404,7 @@ async function refreshFiles() {
 }
 
 async function loadSelectedOrders() {
-  const sources = await Promise.all(selectedOrderFiles.value.map(async (name) => ({ name, text: await (await fetch(`/api/orders/${encodeURIComponent(name)}`)).text() })));
+  const sources = await Promise.all(selectedOrderFiles.value.map(async (name) => ({ name, text: await fetchText(dataUrl("orders", name)) })));
   rows.value = sources.flatMap((source) => normalizeCsvSource(source.text, source.name));
   dataStatus.value = sources.length ? `${formatSourceNames(sources.map((source) => source.name))}，合并 ${number.format(rows.value.length)} 行订单商品数据` : "没有选择订单 CSV";
   if (!periods.value.includes(filters.period)) filters.period = "all";
@@ -415,11 +416,23 @@ async function loadSelectedOrders() {
 async function uploadOrderFiles(event) {
   const files = [...event.target.files].filter((file) => file.name.toLowerCase().endsWith(".csv") || file.type.includes("csv"));
   if (!files.length) return;
-  const body = new FormData();
-  files.forEach((file) => body.append("files", file));
-  await fetch("/api/upload", { method: "POST", body });
+  if (dataMode.value === "api") {
+    const body = new FormData();
+    files.forEach((file) => body.append("files", file));
+    await fetch("/api/upload", { method: "POST", body });
+    event.target.value = "";
+    await refreshFiles();
+    return;
+  }
+  const sources = await Promise.all(files.map(async (file) => ({ name: file.name, text: await file.text() })));
+  rows.value = sources.flatMap((source) => normalizeCsvSource(source.text, source.name));
+  orderFiles.value = sources.map((source) => ({ name: source.name, size: source.text.length, updatedAt: new Date().toISOString() }));
+  selectedOrderFiles.value = sources.map((source) => source.name);
+  dataStatus.value = `${formatSourceNames(sources.map((source) => source.name))}，临时读取 ${number.format(rows.value.length)} 行订单商品数据`;
   event.target.value = "";
-  await refreshFiles();
+  await nextTick();
+  drawShareChart();
+  drawTrendChart();
 }
 
 async function toggleOrderFile(name) {
@@ -429,8 +442,37 @@ async function toggleOrderFile(name) {
 
 async function loadInventoryFromServer(name) {
   inventoryFileName.value = name;
-  const text = await (await fetch(`/api/inventory/${encodeURIComponent(name)}`)).text();
+  const text = await fetchText(dataUrl("inventory", name));
   allModels.value = parseInventoryModels(text);
+}
+
+async function loadFileManifest() {
+  try {
+    const response = await fetch("/api/files");
+    if (!response.ok) throw new Error("api unavailable");
+    dataMode.value = "api";
+    return await response.json();
+  } catch {
+    const response = await fetch(`${staticBase}data-manifest.json`);
+    if (!response.ok) throw new Error("静态数据清单读取失败");
+    const payload = await response.json();
+    dataMode.value = "static";
+    return payload;
+  }
+}
+
+function dataUrl(type, name) {
+  const encoded = encodeURIComponent(name);
+  if (dataMode.value === "api") {
+    return type === "inventory" ? `/api/inventory/${encoded}` : `/api/orders/${encoded}`;
+  }
+  return `${staticBase}data/${type}/${encoded}`;
+}
+
+async function fetchText(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`读取失败：${url}`);
+  return response.text();
 }
 
 async function loadInventoryUpload(event) {
