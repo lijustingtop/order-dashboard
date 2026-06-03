@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.npm-cache/
+.DS_Store
+*.log
+.env
+/orders_export_*.csv
+/tableConvert.com_tib0sx.csv
+/库存型号清单.xlsx
