@@ -238,6 +238,34 @@ button {
   min-width: 0;
 }
 
+.view-nav {
+  display: inline-flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfb;
+  box-shadow: var(--shadow);
+}
+
+.view-nav button {
+  min-height: 36px;
+  min-width: 82px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.view-nav button.is-active {
+  border-color: var(--green);
+  background: #e7f2ed;
+  color: var(--green-strong);
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 420px);
@@ -441,6 +469,156 @@ button {
   margin-bottom: 16px;
 }
 
+.trend-view {
+  display: grid;
+  gap: 18px;
+}
+
+.trend-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.85fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.trend-header h2 {
+  margin-bottom: 8px;
+  font-size: 28px;
+}
+
+.trend-header p:last-child {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.trend-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.trend-kpis article {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  min-height: 126px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f6faf8;
+}
+
+.trend-kpis span,
+.country-metrics span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.trend-kpis strong {
+  color: var(--green-strong);
+  font-size: 34px;
+  line-height: 1;
+}
+
+.trend-kpis small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.country-trend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
+}
+
+.country-trend-card {
+  display: grid;
+  gap: 14px;
+  min-height: 220px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
+}
+
+.country-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.country-card-head strong {
+  font-size: 18px;
+}
+
+.country-card-head span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e7f2ed;
+  color: var(--green-strong);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.country-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.country-metrics div {
+  display: grid;
+  gap: 6px;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
+.country-metrics b {
+  font-size: 20px;
+}
+
+.change-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.change-grid span {
+  display: grid;
+  gap: 4px;
+  min-height: 48px;
+  padding: 8px;
+  border-radius: 8px;
+  background: white;
+}
+
+.change-up,
+.change-down,
+.change-flat {
+  font-weight: 850;
+}
+
+.change-up {
+  color: var(--green-strong);
+}
+
+.change-down {
+  color: var(--red);
+}
+
+.change-flat {
+  color: var(--muted);
+}
+
 .trend-panel canvas {
   width: 100%;
   height: auto;
@@ -609,6 +787,10 @@ table {
   background: white;
 }
 
+.trend-table {
+  min-width: 980px;
+}
+
 th,
 td {
   padding: 12px 13px;
@@ -629,7 +811,9 @@ th {
 
 td:nth-child(4),
 td:nth-child(5),
-td:nth-child(6) {
+td:nth-child(6),
+td:nth-child(7),
+td:nth-child(8) {
   white-space: nowrap;
 }
 
@@ -681,6 +865,10 @@ td:nth-child(6) {
   .split-grid {
     grid-template-columns: 1fr;
   }
+
+  .trend-header {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 860px) {
@@ -718,6 +906,19 @@ td:nth-child(6) {
   .sort-control,
   .share-toggle {
     justify-content: flex-start;
+  }
+
+  .view-nav,
+  .trend-kpis,
+  .country-metrics,
+  .change-grid {
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+
+  .view-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .range-grid {

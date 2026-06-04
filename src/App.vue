@@ -110,7 +110,12 @@
     </aside>
 
     <section class="workspace">
-      <div class="dashboard-grid">
+      <nav class="view-nav" aria-label="页面导航">
+        <button :class="{ 'is-active': activeView === 'overview' }" type="button" @click="activeView = 'overview'">总览</button>
+        <button :class="{ 'is-active': activeView === 'trend' }" type="button" @click="activeView = 'trend'">趋势</button>
+      </nav>
+
+      <div v-if="activeView === 'overview'" class="dashboard-grid">
         <section class="center-stage">
           <header class="product-search">
             <div>
@@ -294,6 +299,102 @@
           </article>
         </aside>
       </div>
+
+      <section v-else class="trend-view">
+        <header class="panel trend-header">
+          <div>
+            <p class="eyebrow">Trend</p>
+            <h2>{{ trendPeriodTitle }}</h2>
+            <p>{{ trendPeriodHint }}</p>
+          </div>
+          <div class="trend-kpis">
+            <article>
+              <span>当前销量</span>
+              <strong>{{ number.format(trendTotals.units) }}</strong>
+              <small>环比 {{ formatChange(trendTotals.unitsMom) }} · 同比 {{ formatChange(trendTotals.unitsYoy) }}</small>
+            </article>
+            <article>
+              <span>当前销售额</span>
+              <strong>{{ money.format(trendTotals.sales) }}</strong>
+              <small>环比 {{ formatChange(trendTotals.salesMom) }} · 同比 {{ formatChange(trendTotals.salesYoy) }}</small>
+            </article>
+          </div>
+        </header>
+
+        <section class="panel country-trend-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Country</p>
+              <h3>分国家销量与销售额趋势</h3>
+            </div>
+            <span>{{ trendRows.length ? `${trendRows.length} 个国家/地区` : "暂无数据" }}</span>
+          </div>
+          <div class="country-trend-grid">
+            <article v-for="item in trendRows" :key="item.country" class="country-trend-card">
+              <div class="country-card-head">
+                <strong>{{ item.country }}</strong>
+                <span>{{ item.market }}</span>
+              </div>
+              <div class="country-metrics">
+                <div>
+                  <span>销量</span>
+                  <b>{{ number.format(item.units) }}</b>
+                </div>
+                <div>
+                  <span>销售额</span>
+                  <b>{{ money.format(item.sales) }}</b>
+                </div>
+              </div>
+              <div class="change-grid">
+                <span>销量环比 <b :class="changeClass(item.unitsMom)">{{ formatChange(item.unitsMom) }}</b></span>
+                <span>销量同比 <b :class="changeClass(item.unitsYoy)">{{ formatChange(item.unitsYoy) }}</b></span>
+                <span>销售额环比 <b :class="changeClass(item.salesMom)">{{ formatChange(item.salesMom) }}</b></span>
+                <span>销售额同比 <b :class="changeClass(item.salesYoy)">{{ formatChange(item.salesYoy) }}</b></span>
+              </div>
+            </article>
+            <div v-if="!trendRows.length" class="empty">当前周期没有可对比的国家趋势数据。</div>
+          </div>
+        </section>
+
+        <section class="panel table-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Comparison</p>
+              <h3>趋势明细</h3>
+            </div>
+            <span>{{ trendCompareLabels.previous }} / {{ trendCompareLabels.lastYear }}</span>
+          </div>
+          <div class="table-wrap">
+            <table class="trend-table">
+              <thead>
+                <tr>
+                  <th>国家/地区</th>
+                  <th>市场</th>
+                  <th>销量</th>
+                  <th>销量环比</th>
+                  <th>销量同比</th>
+                  <th>销售额</th>
+                  <th>销售额环比</th>
+                  <th>销售额同比</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in trendRows" :key="item.country">
+                  <td><div class="model-name">{{ item.country }}</div></td>
+                  <td>{{ item.market }}</td>
+                  <td>{{ number.format(item.units) }}</td>
+                  <td><span :class="changeClass(item.unitsMom)">{{ formatChange(item.unitsMom) }}</span></td>
+                  <td><span :class="changeClass(item.unitsYoy)">{{ formatChange(item.unitsYoy) }}</span></td>
+                  <td>{{ money.format(item.sales) }}</td>
+                  <td><span :class="changeClass(item.salesMom)">{{ formatChange(item.salesMom) }}</span></td>
+                  <td><span :class="changeClass(item.salesYoy)">{{ formatChange(item.salesYoy) }}</span></td>
+                </tr>
+                <tr v-if="!trendRows.length"><td colspan="8"><div class="empty">没有匹配的趋势数据</div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
     </section>
   </main>
 </template>
@@ -323,6 +424,7 @@ const inventoryFileName = ref("");
 const allModels = ref([]);
 const sortBy = ref("units");
 const shareBy = ref("units");
+const activeView = ref("overview");
 const shareCanvas = ref(null);
 const trendCanvas = ref(null);
 const modelChips = ["GTi15", "GTi14", "SER9", "SER8", "EQ14", "EQi13", "ME Pro", "Dock"];
@@ -351,6 +453,7 @@ const filteredRows = computed(() => rows.value.filter((row) => {
   if (!inOptionalRange(row.price, filters.priceMin, filters.priceMax)) return false;
   return true;
 }));
+const comparisonRows = computed(() => rows.value.filter((row) => matchesNonPeriodFilters(row)));
 
 const metrics = computed(() => ({ units: sum(filteredRows.value, "quantity"), sales: sum(filteredRows.value, "sales") }));
 const modelRows = computed(() => summarizeModels(filteredRows.value).sort((a, b) => b[sortBy.value] - a[sortBy.value]));
@@ -388,6 +491,51 @@ const zeroModels = computed(() => {
 const zeroHint = computed(() => {
   if (!allModels.value.length) return "等待导入库存清单";
   return `${inventoryFileName.value} · ${number.format(zeroModels.value.length)} 个未售出型号`;
+});
+const activeTrendPeriod = computed(() => filters.period === "all" ? periods.value[0] || "" : filters.period);
+const trendCompareLabels = computed(() => {
+  const period = activeTrendPeriod.value;
+  return {
+    current: period || "暂无周期",
+    previous: previousPeriod(period, filters.timeMode) || "上一周期无数据",
+    lastYear: yearAgoPeriod(period, filters.timeMode) || "去年同期无数据",
+  };
+});
+const trendPeriodTitle = computed(() => `${timeModeLabel(filters.timeMode)}趋势 · ${trendCompareLabels.value.current}`);
+const trendPeriodHint = computed(() => {
+  if (!activeTrendPeriod.value) return "等待订单数据加载后生成趋势。";
+  const currentText = filters.period === "all" ? "当前未指定周期，自动使用最新周期" : "跟随左侧选定周期";
+  return `${currentText}；环比对比 ${trendCompareLabels.value.previous}，同比对比 ${trendCompareLabels.value.lastYear}。`;
+});
+const trendRows = computed(() => {
+  const current = indexByCountry(summarizeCountries(rowsForPeriod(activeTrendPeriod.value)));
+  const previous = indexByCountry(summarizeCountries(rowsForPeriod(trendCompareLabels.value.previous)));
+  const lastYear = indexByCountry(summarizeCountries(rowsForPeriod(trendCompareLabels.value.lastYear)));
+  const countries = [...new Set([...current.keys(), ...previous.keys(), ...lastYear.keys()])];
+  return countries.map((country) => {
+    const item = current.get(country) || { country, market: previous.get(country)?.market || lastYear.get(country)?.market || "", units: 0, sales: 0 };
+    const previousItem = previous.get(item.country);
+    const lastYearItem = lastYear.get(item.country);
+    return {
+      ...item,
+      unitsMom: changeRate(item.units, previousItem?.units || 0),
+      unitsYoy: changeRate(item.units, lastYearItem?.units || 0),
+      salesMom: changeRate(item.sales, previousItem?.sales || 0),
+      salesYoy: changeRate(item.sales, lastYearItem?.sales || 0),
+    };
+  }).sort((a, b) => b.sales - a.sales);
+});
+const trendTotals = computed(() => {
+  const current = { units: sum(trendRows.value, "units"), sales: sum(trendRows.value, "sales") };
+  const previous = summarizeTotal(rowsForPeriod(trendCompareLabels.value.previous));
+  const lastYear = summarizeTotal(rowsForPeriod(trendCompareLabels.value.lastYear));
+  return {
+    ...current,
+    unitsMom: changeRate(current.units, previous.units),
+    unitsYoy: changeRate(current.units, lastYear.units),
+    salesMom: changeRate(current.sales, previous.sales),
+    salesYoy: changeRate(current.sales, lastYear.sales),
+  };
 });
 
 watch([marketShare, shareBy, shareCanvas], () => nextTick(drawShareChart), { deep: true });
@@ -490,6 +638,16 @@ function selectMarket(market) {
 
 function resetFilters() {
   Object.assign(filters, { timeMode: "week", period: "all", market: "all", region: "all", query: "", qtyMin: "", qtyMax: "", priceMin: "", priceMax: "" });
+}
+
+function matchesNonPeriodFilters(row) {
+  const query = filters.query.trim().toLowerCase();
+  if (filters.market !== "all" && row.market !== filters.market) return false;
+  if (filters.region !== "all" && !matchesRegion(row, filters.region)) return false;
+  if (query && !`${row.model} ${row.fullName} ${row.sku}`.toLowerCase().includes(query)) return false;
+  if (!inOptionalRange(row.quantity, filters.qtyMin, filters.qtyMax)) return false;
+  if (!inOptionalRange(row.price, filters.priceMin, filters.priceMax)) return false;
+  return true;
 }
 
 function normalizeCsvSource(text, sourceName) {
@@ -763,6 +921,86 @@ function matchesRegion(row, region) {
   if (region === "欧盟") return row.market === "欧盟";
   if (region === "自发货") return row.market === "自发货" && !["加拿大", "日本", "新加坡"].includes(row.region);
   return row.region === region;
+}
+
+function rowsForPeriod(period) {
+  if (!period) return [];
+  return comparisonRows.value.filter((row) => row[timeKey.value] === period);
+}
+
+function summarizeCountries(items) {
+  return groupBy(items, "countryName").map(([country, group]) => ({ country, market: topValue(group.map((item) => item.market)), units: sum(group, "quantity"), sales: sum(group, "sales") })).filter((item) => item.units || item.sales);
+}
+
+function summarizeTotal(items) {
+  return { units: sum(items, "quantity"), sales: sum(items, "sales") };
+}
+
+function indexByCountry(items) {
+  return new Map(items.map((item) => [item.country, item]));
+}
+
+function previousPeriod(period, mode) {
+  if (!period) return "";
+  if (mode === "year") return String(Number(period) - 1);
+  if (mode === "quarter") {
+    const match = period.match(/^(\d{4}) Q([1-4])$/);
+    if (!match) return "";
+    const year = Number(match[1]);
+    const quarter = Number(match[2]);
+    return quarter === 1 ? `${year - 1} Q4` : `${year} Q${quarter - 1}`;
+  }
+  if (mode === "month") return shiftMonth(period, -1);
+  return shiftWeek(period, -7);
+}
+
+function yearAgoPeriod(period, mode) {
+  if (!period) return "";
+  if (mode === "year") return String(Number(period) - 1);
+  if (mode === "quarter") return period.replace(/^(\d{4})/, (year) => String(Number(year) - 1));
+  if (mode === "month") return shiftMonth(period, -12);
+  return shiftWeek(period, -364);
+}
+
+function shiftMonth(period, offset) {
+  const match = period.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return "";
+  const date = new Date(Number(match[1]), Number(match[2]) - 1 + offset, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function shiftWeek(period, days) {
+  const [startText] = period.split(" 至 ");
+  const start = parseDateKey(startText);
+  if (!start) return "";
+  start.setDate(start.getDate() + days);
+  return getThursdayWeek(start);
+}
+
+function parseDateKey(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function changeRate(current, previous) {
+  if (!previous) return current ? Infinity : 0;
+  return (current - previous) / previous;
+}
+
+function formatChange(value) {
+  if (value === Infinity) return "新增";
+  if (!Number.isFinite(value)) return "N/A";
+  if (Object.is(value, -0) || value === 0) return "0.0%";
+  return `${value > 0 ? "+" : ""}${percent.format(value)}`;
+}
+
+function changeClass(value) {
+  return { "change-up": value > 0, "change-down": value < 0, "change-flat": value === 0 };
+}
+
+function timeModeLabel(mode) {
+  return { week: "周度", month: "月度", quarter: "季度", year: "年度" }[mode] || "周期";
 }
 
 function inOptionalRange(value, min, max) {
