@@ -945,6 +945,35 @@ button {
   min-width: 0;
 }
 
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-strip article {
+  display: grid;
+  gap: 8px;
+  min-height: 112px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.summary-strip span,
+.summary-strip small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.summary-strip strong {
+  font-size: 30px;
+  line-height: 1;
+}
+
 .sort-control {
   display: flex;
   gap: 8px;
@@ -1009,6 +1038,16 @@ button {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
+}
+
+.scroll-table {
+  max-height: min(560px, 62vh);
+}
+
+.scroll-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 table {

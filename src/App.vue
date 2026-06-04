@@ -113,13 +113,13 @@
             </div>
             <label>
               <span>型号关键词</span>
-              <input v-model="filters.query" type="search" list="modelSuggestions" placeholder="搜索 GTi15、SER9、EQ14、Dock..." />
+              <input v-model="overviewSearch" type="search" list="modelSuggestions" placeholder="搜索 GTi15、SER9、EQ14、Dock..." />
               <datalist id="modelSuggestions">
                 <option v-for="model in modelSuggestions" :key="model" :value="model"></option>
               </datalist>
             </label>
             <div class="model-chips">
-              <button v-for="chip in modelChips" :key="chip" class="model-chip" type="button" @click="filters.query = chip">{{ chip }}</button>
+              <button v-for="chip in modelChips" :key="chip" class="model-chip" type="button" @click="overviewSearch = chip">{{ chip }}</button>
             </div>
           </header>
 
@@ -127,7 +127,7 @@
             <div class="sales-main">
               <div>
                 <p class="eyebrow">Sales Volume</p>
-                <h2>{{ filters.query ? `${filters.query} 销量` : "销量" }}</h2>
+                <h2>{{ overviewSearch ? `${overviewSearch} 销量` : "销量" }}</h2>
               </div>
               <strong>{{ number.format(metrics.units) }}</strong>
               <div class="hero-metrics">
@@ -227,10 +227,10 @@
           </div>
           <label>
             <span>型号关键词</span>
-            <input v-model="filters.query" type="search" list="modelSuggestions" placeholder="搜索 GTi15、SER9、EQ14、Dock..." />
+            <input v-model="trendSearch" type="search" list="modelSuggestions" placeholder="搜索 GTi15、SER9、EQ14、Dock..." />
           </label>
           <div class="model-chips">
-            <button v-for="chip in modelChips" :key="chip" class="model-chip" type="button" @click="filters.query = chip">{{ chip }}</button>
+            <button v-for="chip in modelChips" :key="chip" class="model-chip" type="button" @click="trendSearch = chip">{{ chip }}</button>
           </div>
         </header>
 
@@ -258,7 +258,7 @@
           <div class="panel-head">
             <div>
               <p class="eyebrow">Line Chart</p>
-              <h3>{{ filters.query ? `${filters.query} 销量与销售额趋势` : "整体销量与销售额趋势" }}</h3>
+              <h3>{{ selectedTrendModel ? `${selectedTrendModel} 销量与销售额趋势` : "整体销量与销售额趋势" }}</h3>
             </div>
             <div class="sort-control" aria-label="趋势指标">
               <button :class="{ 'is-active': trendMetric === 'units' }" type="button" @click="trendMetric = 'units'">{{ selectedTrendModel ? "国家按销量" : "明细按销量" }}</button>
@@ -273,7 +273,7 @@
             <span v-for="item in trendSeries.series" :key="item.name">
               <i :style="{ background: item.color }"></i>{{ item.name }}
             </span>
-            <span v-if="filters.query"><i class="price-dot"></i>虚线：单价趋势</span>
+            <span v-if="selectedTrendModel"><i class="price-dot"></i>虚线：单价趋势</span>
           </div>
         </section>
 
@@ -373,7 +373,7 @@
               </button>
               <div v-if="expandedCustomerKey === customer.key" class="ranking-detail">
                 <div v-for="detail in customer.details" :key="detail.key" class="detail-row detail-row-stack">
-                  <button class="model-link" type="button" :title="modelInfoTitle(detail.model)" @click="openModelTrend(detail.model)">{{ detail.time }} · {{ detail.model }}</button>
+                  <button class="model-link" type="button" :title="modelInfoTitle(detail.model)" @click="openModelTrend(detail.model)">{{ detail.time }} · {{ detail.order || "未知订单" }} · {{ detail.model }}</button>
                   <strong>{{ number.format(detail.units) }} 件 · {{ decimalMoney.format(detail.price) }}</strong>
                 </div>
               </div>
@@ -448,6 +448,19 @@
       </section>
 
       <section v-else class="trend-view">
+        <section class="summary-strip">
+          <article>
+            <span>退款金额汇总</span>
+            <strong>{{ money.format(refundTotal) }}</strong>
+            <small>{{ number.format(refundRows.length) }} 笔退款</small>
+          </article>
+          <article>
+            <span>优惠金额汇总</span>
+            <strong>{{ money.format(couponTotal) }}</strong>
+            <small>{{ number.format(couponRows.length) }} 个优惠码</small>
+          </article>
+        </section>
+
         <section class="panel table-panel">
           <div class="panel-head">
             <div>
@@ -456,7 +469,7 @@
             </div>
             <span>{{ number.format(refundRows.length) }} 笔 · {{ money.format(refundTotal) }}</span>
           </div>
-          <div class="table-wrap">
+          <div class="table-wrap scroll-table">
             <table>
               <thead>
                 <tr>
@@ -489,7 +502,7 @@
             </div>
             <span>{{ number.format(couponRows.length) }} 个优惠码 · {{ money.format(couponTotal) }}</span>
           </div>
-          <div class="table-wrap">
+          <div class="table-wrap scroll-table">
             <table>
               <thead>
                 <tr>
@@ -530,7 +543,7 @@ const number = new Intl.NumberFormat("zh-CN");
 const percent = new Intl.NumberFormat("zh-CN", { style: "percent", maximumFractionDigits: 1 });
 const regionNames = new Intl.DisplayNames(["zh-CN"], { type: "region" });
 
-const filters = reactive({ timeMode: "week", period: "all", country: "all", query: "", qtyMin: "", qtyMax: "", priceMin: "", priceMax: "" });
+const filters = reactive({ timeMode: "week", period: "all", country: "all", qtyMin: "", qtyMax: "", priceMin: "", priceMax: "" });
 const rows = ref([]);
 const allOrderRows = ref([]);
 const dataStatus = ref("正在读取订单数据");
@@ -547,6 +560,8 @@ const trendMetric = ref("units");
 const trendSortAsc = ref(true);
 const customerMetric = ref("sales");
 const countrySearch = ref("");
+const overviewSearch = ref("");
+const trendSearch = ref("");
 const inventorySearch = ref("");
 const rankingMode = ref("country");
 const expandedRankingKey = ref("");
@@ -578,10 +593,10 @@ const periods = computed(() => [...new Set(rows.value.map((row) => row[timeKey.v
 const timeKey = computed(() => (filters.timeMode === "year" ? "year" : filters.timeMode === "quarter" ? "quarter" : filters.timeMode === "month" ? "month" : "week"));
 
 const filteredRows = computed(() => rows.value.filter((row) => {
-  const query = filters.query.trim().toLowerCase();
+  const query = overviewSearch.value.trim().toLowerCase();
   if (filters.period !== "all" && row[timeKey.value] !== filters.period) return false;
   if (filters.country !== "all" && row.countryName !== filters.country) return false;
-  if (query && !`${row.model} ${row.fullName} ${row.sku}`.toLowerCase().includes(query)) return false;
+  if (query && !rowMatchesQuery(row, query)) return false;
   if (!inOptionalRange(row.quantity, filters.qtyMin, filters.qtyMax)) return false;
   if (!inOptionalRange(row.price, filters.priceMin, filters.priceMax)) return false;
   return true;
@@ -653,7 +668,7 @@ const trendPeriodTitle = computed(() => `${timeModeLabel(filters.timeMode)}趋�
 const trendPeriodHint = computed(() => {
   if (!activeTrendPeriod.value) return "等待订单数据加载后生成趋势。";
   const currentText = filters.period === "all" ? "当前未指定周期，自动使用最新周期" : "跟随左侧选定周期";
-  const modelText = filters.query ? `当前展示 ${filters.query} 的单独趋势。` : "当前展示整体销量和销售额趋势。";
+  const modelText = selectedTrendModel.value ? `当前展示 ${selectedTrendModel.value} 的单独趋势。` : "当前展示整体销量和销售额趋势。";
   return `${modelText}${currentText}；环比对比 ${trendCompareLabels.value.previous}，同比对比 ${trendCompareLabels.value.lastYear}。`;
 });
 const trendRows = computed(() => {
@@ -721,7 +736,7 @@ const trendOverallTotals = computed(() => {
 });
 const trendMetricLabel = computed(() => trendMetric.value === "sales" ? "销售额" : "销量");
 const trendEntityLabel = computed(() => "机型");
-const selectedTrendModel = computed(() => filters.query.trim());
+const selectedTrendModel = computed(() => trendSearch.value.trim());
 const topTrendNames = computed(() => {
   const basis = summarizeModels(rowsForPeriod(activeTrendPeriod.value)).map(modelSummaryToTrend);
   const fallback = summarizeModels(comparisonRows.value).map(modelSummaryToTrend);
@@ -735,7 +750,7 @@ const priceHistoryRows = computed(() => selectedTrendModel.value ? modelPricePoi
 const trendChartWidth = computed(() => Math.max(1120, periods.value.length * 86));
 const trendSeries = computed(() => {
   const chronologicalPeriods = [...periods.value].reverse();
-  const modelQuery = filters.query.trim();
+  const modelQuery = selectedTrendModel.value;
   const seriesRows = (period) => rowsForPeriod(period);
   const series = [
     {
@@ -753,7 +768,8 @@ const trendSeries = computed(() => {
   ];
   return { labels: chronologicalPeriods.map(shortPeriodLabel), series };
 });
-const customerRows = computed(() => summarizeCustomers(filteredRows.value)
+const customerBaseRows = computed(() => rows.value.filter((row) => matchesGlobalFilters(row)));
+const customerRows = computed(() => summarizeCustomers(customerBaseRows.value)
   .sort((a, b) => b[customerMetric.value] - a[customerMetric.value] || a.name.localeCompare(b.name))
   .slice(0, 10)
   .map((item, index) => ({ ...item, rank: index + 1 })));
@@ -874,13 +890,15 @@ async function loadInventoryUpload(event) {
     return;
   }
   inventoryFileName.value = file.name;
-  inventoryItems.value = parseInventoryItems(await readSheetFile(file));
+  inventoryItems.value = parseInventoryItems(await readInventoryFile(file));
   event.target.value = "";
 }
 
 function resetFilters() {
-  Object.assign(filters, { timeMode: "week", period: "all", country: "all", query: "", qtyMin: "", qtyMax: "", priceMin: "", priceMax: "" });
+  Object.assign(filters, { timeMode: "week", period: "all", country: "all", qtyMin: "", qtyMax: "", priceMin: "", priceMax: "" });
   countrySearch.value = "";
+  overviewSearch.value = "";
+  trendSearch.value = "";
   inventorySearch.value = "";
   expandedRankingKey.value = "";
 }
@@ -900,15 +918,13 @@ function toggleCustomer(key) {
 
 function openModelTrend(model) {
   if (!model) return;
-  filters.query = model;
+  trendSearch.value = model;
   activeView.value = "trend";
   nextTick(drawCountryTrendChart);
 }
 
 function matchesNonPeriodFilters(row) {
-  const query = filters.query.trim().toLowerCase();
   if (filters.country !== "all" && row.countryName !== filters.country) return false;
-  if (query && !`${row.model} ${row.fullName} ${row.sku}`.toLowerCase().includes(query)) return false;
   if (!inOptionalRange(row.quantity, filters.qtyMin, filters.qtyMax)) return false;
   if (!inOptionalRange(row.price, filters.priceMin, filters.priceMax)) return false;
   return true;
@@ -920,12 +936,16 @@ function matchesGlobalFilters(row) {
 }
 
 function matchesCountryRankingFilters(row) {
-  const query = filters.query.trim().toLowerCase();
+  const query = overviewSearch.value.trim().toLowerCase();
   if (filters.period !== "all" && row[timeKey.value] !== filters.period) return false;
-  if (query && !`${row.model} ${row.fullName} ${row.sku}`.toLowerCase().includes(query)) return false;
+  if (query && !rowMatchesQuery(row, query)) return false;
   if (!inOptionalRange(row.quantity, filters.qtyMin, filters.qtyMax)) return false;
   if (!inOptionalRange(row.price, filters.priceMin, filters.priceMax)) return false;
   return true;
+}
+
+function rowMatchesQuery(row, query) {
+  return `${row.model} ${row.fullName} ${row.sku}`.toLowerCase().includes(query);
 }
 
 function normalizeCsvSource(text, sourceName, options = {}) {
@@ -1046,6 +1066,10 @@ function parseCsv(text) {
 function parseInventoryItems(text) {
   const records = parseCsv(text.trim());
   if (!records.length) return [];
+  const wideRows = wideInventoryRows(records);
+  if (wideRows.length) {
+    return groupInventoryItems(wideRows).sort((a, b) => a.model.localeCompare(b.model));
+  }
   const hasHeader = records[0].some((cell) => /sku|model|型号|产品|quantity|qty|数量|库存|warehouse|仓库/i.test(String(cell || "")));
   const headers = hasHeader ? records[0].map((header) => String(header || "").trim().toLowerCase()) : [];
   const dataRows = hasHeader ? records.slice(1) : records;
@@ -1057,9 +1081,9 @@ function parseInventoryItems(text) {
   dataRows.forEach((row) => {
     const rawModel = row[modelIndex >= 0 ? modelIndex : 0] || row.find((cell) => String(cell || "").trim());
     const model = normalizeModelKey(rawModel);
-    if (!model || model.toLowerCase().includes("accessories")) return;
+    if (!model || isAccessoryText(model)) return;
     const warehouse = warehouseIndex >= 0 ? String(row[warehouseIndex] || "").trim() : inferWarehouse(rawModel);
-    const productionStatus = normalizeProductionStatus(statusIndex >= 0 ? row[statusIndex] : "");
+    const productionStatus = normalizeProductionStatus(statusIndex >= 0 ? row[statusIndex] : "") || "停产/不备货";
     const stock = qtyIndex >= 0 ? toNumber(row[qtyIndex]) : 0;
     const market = warehouseToMarket(warehouse);
     const previous = map.get(`${model}:${warehouse}`) || { model, warehouse, market, productionStatus, stock: 0 };
@@ -1068,6 +1092,18 @@ function parseInventoryItems(text) {
     map.set(`${model}:${warehouse}`, previous);
   });
   return [...map.values()].sort((a, b) => a.model.localeCompare(b.model));
+}
+
+function groupInventoryItems(items) {
+  const map = new Map();
+  items.forEach((item) => {
+    const market = warehouseToMarket(item.warehouse);
+    const previous = map.get(`${item.model}:${item.warehouse}`) || { model: item.model, warehouse: item.warehouse, market, productionStatus: item.productionStatus, stock: 0 };
+    previous.stock += Number(item.stock || 0);
+    previous.productionStatus = previous.productionStatus === "正常" || item.productionStatus === "正常" ? "正常" : previous.productionStatus || item.productionStatus;
+    map.set(`${item.model}:${item.warehouse}`, previous);
+  });
+  return [...map.values()];
 }
 
 function findHeaderIndex(headers, keywords) {
@@ -1087,6 +1123,64 @@ async function readSheetFile(file) {
   const firstSheet = workbook.SheetNames[0];
   if (!firstSheet) return "";
   return XLSX.utils.sheet_to_csv(workbook.Sheets[firstSheet]);
+}
+
+async function readInventoryFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".csv") || file.type.includes("csv")) return file.text();
+  const data = await file.arrayBuffer();
+  const workbook = XLSX.read(data, { type: "array" });
+  return inventoryWorkbookToCsv(workbook);
+}
+
+function inventoryWorkbookToCsv(workbook) {
+  const inventorySheetName = workbook.SheetNames.find((name) => name.includes("库存")) || workbook.SheetNames[0];
+  const statusSheetName = workbook.SheetNames.find((name) => name.includes("正常机型"));
+  const inventoryRecords = XLSX.utils.sheet_to_json(workbook.Sheets[inventorySheetName], { header: 1, defval: "" });
+  const normalModels = statusSheetName ? normalModelSet(XLSX.utils.sheet_to_json(workbook.Sheets[statusSheetName], { header: 1, defval: "" })) : new Set();
+  const rows = wideInventoryRows(inventoryRecords, normalModels);
+  if (!rows.length) return XLSX.utils.sheet_to_csv(workbook.Sheets[inventorySheetName]);
+  return toCsv([["model", "warehouse", "stock", "productionStatus"], ...rows.map((row) => [row.model, row.warehouse, row.stock, row.productionStatus])]);
+}
+
+function normalModelSet(records) {
+  const set = new Set();
+  records.forEach((row) => {
+    const status = String(row[0] || "").trim();
+    const model = row.slice(1).find((cell) => String(cell || "").trim());
+    if (/正常/.test(status) && model) set.add(normalizeModelKey(model));
+  });
+  return set;
+}
+
+function wideInventoryRows(records, normalModels = new Set()) {
+  if (!records.length) return [];
+  const headers = records[0].map((cell) => String(cell || "").trim());
+  const modelIndex = headers.findIndex((header) => /商务统一型号|型号|产品/.test(header));
+  const specIndexes = [
+    { label: "美规", warehouse: "美国仓库", index: headers.findIndex((header) => header === "美规") },
+    { label: "欧规", warehouse: "德国仓库", index: headers.findIndex((header) => header === "欧规") },
+    { label: "英规", warehouse: "英国仓库", index: headers.findIndex((header) => header === "英规") },
+  ].filter((item) => item.index >= 0);
+  if (modelIndex < 0 || !specIndexes.length) return [];
+  const rows = [];
+  records.slice(1).forEach((record) => {
+    const rawModel = record[modelIndex];
+    const model = normalizeModelKey(rawModel);
+    if (!model || model === "部门" || isAccessoryText(model)) return;
+    const productionStatus = normalModels.has(model) ? "正常" : "停产/不备货";
+    specIndexes.forEach((spec) => {
+      rows.push({ model, warehouse: spec.warehouse, stock: toNumber(record[spec.index]), productionStatus });
+    });
+  });
+  return rows;
+}
+
+function toCsv(records) {
+  return records.map((row) => row.map((cell) => {
+    const text = String(cell ?? "");
+    return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }).join(",")).join("\n");
 }
 
 function drawShareChart() {
@@ -1251,7 +1345,7 @@ function drawCountryTrendChart() {
       ctx.fill();
     });
   });
-  if (filters.query.trim()) {
+  if (selectedTrendModel.value) {
     const maxPrice = Math.max(...series.flatMap((item) => item.prices), 1);
     series.forEach((item) => {
       ctx.strokeStyle = item.color;
@@ -1326,7 +1420,11 @@ function modelFromSku(sku, name) {
 }
 
 function isAccessoryModel(row) {
-  return `${row.model} ${row.fullName} ${row.sku}`.toLowerCase().includes("accessories");
+  return isAccessoryText(`${row.model} ${row.fullName} ${row.sku}`);
+}
+
+function isAccessoryText(value) {
+  return String(value || "").toLowerCase().includes("accessories");
 }
 
 function isRefundedOrder(row) {
@@ -1354,7 +1452,8 @@ function formatDate(date) {
 
 function rowsForPeriod(period) {
   if (!period) return [];
-  return comparisonRows.value.filter((row) => row[timeKey.value] === period);
+  const query = selectedTrendModel.value.toLowerCase();
+  return comparisonRows.value.filter((row) => row[timeKey.value] === period && (!query || rowMatchesQuery(row, query)));
 }
 
 function summarizeCountries(items) {
@@ -1385,6 +1484,7 @@ function summarizeCustomers(items) {
       details: group
         .map((item, index) => ({
           key: `${item.order || item.dateKey}:${item.model}:${index}`,
+          order: item.order,
           time: item.dateKey,
           model: item.model,
           units: item.quantity,
@@ -1542,9 +1642,9 @@ function summarizeModels(items) {
 
 function inferWarehouse(value) {
   const text = String(value || "");
-  if (/_U\b|美国仓|US/i.test(text)) return "美国仓库";
-  if (/_H\b|德国仓|DE/i.test(text)) return "德国仓库";
-  if (/_K\b|英国仓|UK|GB/i.test(text)) return "英国仓库";
+  if (/_U\b|美国仓|美规|US/i.test(text)) return "美国仓库";
+  if (/_H\b|德国仓|欧规|DE/i.test(text)) return "德国仓库";
+  if (/_K\b|英国仓|英规|UK|GB/i.test(text)) return "英国仓库";
   return "";
 }
 
@@ -1599,7 +1699,7 @@ function daysBetween(startText, endText) {
 }
 
 function modelPriceChange(model) {
-  const points = modelPricePoints(model);
+  const points = changedPricePoints(modelPricePoints(model));
   if (points.length < 2) return "暂无变化";
   const lines = points.map((point) => `${point.dateKey} ${decimalMoney.format(point.avgPrice)}`);
   const first = points[0];
@@ -1618,6 +1718,16 @@ function modelPricePoints(model) {
     }))
     .filter((item) => item.avgPrice > 0)
     .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+}
+
+function changedPricePoints(points) {
+  if (points.length < 2) return points;
+  const changed = [points[0]];
+  points.slice(1).forEach((point) => {
+    const previous = changed[changed.length - 1];
+    if (Math.abs(point.avgPrice - previous.avgPrice) >= 0.01) changed.push(point);
+  });
+  return changed.length > 1 ? changed : [];
 }
 
 function groupBy(items, key) {
