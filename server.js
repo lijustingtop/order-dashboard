@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer } from "vite";
+import * as XLSX from "xlsx";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -15,16 +16,10 @@ await fs.mkdir(ordersDir, { recursive: true });
 await fs.mkdir(inventoryDir, { recursive: true });
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: async (_req, _file, cb) => {
-      await fs.mkdir(ordersDir, { recursive: true });
-      cb(null, ordersDir);
-    },
-    filename: (_req, file, cb) => cb(null, safeFileName(file.originalname)),
-  }),
+  storage: multer.memoryStorage(),
   fileFilter: (_req, file, cb) => {
-    const ok = file.originalname.toLowerCase().endsWith(".csv") || file.mimetype.includes("csv");
-    cb(ok ? null : new Error("只支持 CSV 文件"), ok);
+    const ok = isSupportedSheet(file.originalname, file.mimetype);
+    cb(ok ? null : new Error("只支持 CSV 或 Excel 文件"), ok);
   },
 });
 
@@ -49,7 +44,20 @@ app.get("/api/inventory/:name", async (req, res) => {
 });
 
 app.post("/api/upload", upload.array("files"), (req, res) => {
-  res.json({ files: req.files.map((file) => ({ name: file.filename, size: file.size })) });
+  Promise.all(req.files.map((file) => saveUploadedSheet(file, ordersDir, "orders"))).then((files) => {
+    res.json({ files });
+  }).catch((error) => {
+    res.status(400).json({ error: error.message });
+  });
+});
+
+app.post("/api/inventory/upload", upload.array("files"), (req, res) => {
+  Promise.all(req.files.map((file) => saveUploadedSheet(file, inventoryDir, "inventory"))).then(async (files) => {
+    await pruneInventoryFiles();
+    res.json({ files });
+  }).catch((error) => {
+    res.status(400).json({ error: error.message });
+  });
 });
 
 const vite = await createViteServer({
@@ -77,10 +85,46 @@ async function listCsvFiles(dir) {
   return files.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+async function saveUploadedSheet(file, targetDir, type) {
+  await fs.mkdir(targetDir, { recursive: true });
+  const csv = sheetToCsv(file);
+  const filename = type === "inventory" ? await nextInventoryName() : safeFileName(file.originalname);
+  const filePath = path.join(targetDir, filename);
+  await fs.writeFile(filePath, csv);
+  return { name: filename, size: Buffer.byteLength(csv), updatedAt: new Date().toISOString() };
+}
+
+function sheetToCsv(file) {
+  const name = file.originalname.toLowerCase();
+  if (name.endsWith(".csv")) return file.buffer.toString("utf8");
+  const workbook = XLSX.read(file.buffer, { type: "buffer", cellDates: false });
+  const firstSheet = workbook.SheetNames[0];
+  if (!firstSheet) throw new Error("Excel 文件没有工作表");
+  return XLSX.utils.sheet_to_csv(workbook.Sheets[firstSheet]);
+}
+
+function isSupportedSheet(name, mime = "") {
+  const lower = name.toLowerCase();
+  return lower.endsWith(".csv") || lower.endsWith(".xlsx") || lower.endsWith(".xls") || mime.includes("csv") || mime.includes("spreadsheet") || mime.includes("excel");
+}
+
 function safeFileName(name) {
   const parsed = path.parse(name);
   const base = parsed.name.replace(/[^\w.\-\u4e00-\u9fa5]+/g, "_").slice(0, 80) || "orders";
   return `${base}_${Date.now()}.csv`;
+}
+
+async function nextInventoryName() {
+  const today = new Date().toISOString().slice(0, 10);
+  const files = await listCsvFiles(inventoryDir);
+  const todayCount = files.filter((file) => file.name.startsWith(`${today}-`)).length;
+  return `${today}-${String(todayCount + 1).padStart(2, "0")}.csv`;
+}
+
+async function pruneInventoryFiles() {
+  const files = await listCsvFiles(inventoryDir);
+  const staleFiles = files.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).slice(3);
+  await Promise.all(staleFiles.map((file) => fs.rm(path.join(inventoryDir, file.name), { force: true })));
 }
 
 function resolveInside(root, name) {
