@@ -95,11 +95,22 @@ async function listCsvFiles(dir) {
 
 async function saveUploadedSheet(file, targetDir, type) {
   await fs.mkdir(targetDir, { recursive: true });
-  const csv = file.buffer.toString("utf8");
+  const csv = decodeCsvBuffer(file.buffer);
   const filename = type === "inventory" ? await nextInventoryName() : safeFileName(file.originalname);
   const filePath = path.join(targetDir, filename);
   await fs.writeFile(filePath, csv);
   return { name: filename, size: Buffer.byteLength(csv), updatedAt: new Date().toISOString() };
+}
+
+function decodeCsvBuffer(buffer) {
+  if (buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) return buffer.subarray(3).toString("utf8");
+  const utf8 = buffer.toString("utf8");
+  if (!utf8.includes("\uFFFD")) return utf8;
+  try {
+    return new TextDecoder("gb18030").decode(buffer);
+  } catch {
+    return utf8;
+  }
 }
 
 function isSupportedSheet(name, mime = "") {

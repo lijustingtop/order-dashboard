@@ -834,6 +834,54 @@ const refundRows = computed(() => summarizeRefundOrders(filteredAllOrderRows.val
 const refundTotal = computed(() => sum(refundRows.value, "refundedAmount"));
 const couponRows = computed(() => summarizeCoupons(filteredAllOrderRows.value));
 const couponTotal = computed(() => sum(couponRows.value, "amount"));
+const rowsByModelKey = computed(() => {
+  const map = new Map();
+  rows.value.forEach((row) => {
+    const key = modelMatchKey(row.model);
+    if (!key) return;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row);
+  });
+  return map;
+});
+const modelSalesByMatchKey = computed(() => new Map([...rowsByModelKey.value.entries()].map(([key, group]) => [key, {
+  model: group.find((item) => item.model)?.model || key,
+  countries: [...new Set(group.map((item) => item.countryName))].sort(),
+  units: sum(group, "quantity"),
+  avgPrice: weightedAverage(group),
+  sales: sum(group, "sales"),
+}])));
+const recentSalesByModelSpec = computed(() => {
+  const reference = latestOrderDate.value || new Date();
+  const cutoff = new Date(reference);
+  cutoff.setDate(cutoff.getDate() - 90);
+  const map = new Map();
+  rows.value.forEach((row) => {
+    if (!row.createdAt || Number.isNaN(row.createdAt.getTime()) || row.createdAt < cutoff || row.createdAt > reference) return;
+    const key = `${modelMatchKey(row.model)}::${normalizePowerSpec(row.powerSpec || row.sku || row.fullName)}`;
+    const previous = map.get(key) || { recentUnits: 0, latestSaleDate: "" };
+    previous.recentUnits += Number(row.quantity || 0);
+    if (row.dateKey && row.dateKey > previous.latestSaleDate) previous.latestSaleDate = row.dateKey;
+    map.set(key, previous);
+  });
+  return map;
+});
+const priceChangeByModelKey = computed(() => {
+  const map = new Map();
+  rowsByModelKey.value.forEach((group, key) => {
+    const points = changedPricePoints(pricePointsFromRows(group));
+    if (points.length < 2) {
+      map.set(key, "暂无变化");
+      return;
+    }
+    const recentPoints = points.slice(-3);
+    const first = recentPoints[0];
+    const last = recentPoints[recentPoints.length - 1];
+    const summary = `最近变化 ${formatChange(changeRate(last.avgPrice, first.avgPrice))}`;
+    map.set(key, `${summary}\n${recentPoints.map((point) => `${point.dateKey} ${decimalMoney.format(point.avgPrice)}`).join("\n")}`);
+  });
+  return map;
+});
 const inventoryHint = computed(() => inventoryFileName.value ? `${inventoryFileName.value} · ${number.format(inventoryRows.value.length)} 个库存机型` : "等待库存表；支持型号、数量、仓库列。");
 const inventoryStatusOptions = computed(() => [
   { value: "all", label: "全部状态" },
@@ -845,7 +893,7 @@ const inventoryWarehouseOptions = computed(() => {
   return [{ value: "all", label: "全部仓库" }, ...options.map((item) => ({ value: item, label: item }))];
 });
 const inventoryRows = computed(() => {
-  const sold = summarizeModelsByMatchKey(rows.value);
+  const sold = modelSalesByMatchKey.value;
   const query = inventorySearch.value.trim().toLowerCase();
   const filteredInventory = inventoryItems.value.filter((item) => {
     if (inventoryStatusFilter.value !== "all" && item.productionStatus !== inventoryStatusFilter.value) return false;
@@ -906,8 +954,9 @@ async function refreshFiles() {
 
 async function loadSelectedOrders() {
   const sources = await Promise.all(selectedOrderFiles.value.map(async (name) => ({ name, text: await fetchText(dataUrl("orders", name)) })));
-  rows.value = dedupeOrderRows(sources.flatMap((source) => normalizeCsvSource(source.text, source.name)));
-  allOrderRows.value = dedupeOrderRows(sources.flatMap((source) => normalizeCsvSource(source.text, source.name, { includeRefunded: true })));
+  const parsedRows = dedupeOrderRows(sources.flatMap((source) => normalizeCsvSource(source.text, source.name, { includeRefunded: true })));
+  allOrderRows.value = parsedRows;
+  rows.value = parsedRows.filter((row) => !isRefundedOrder(row));
   dataStatus.value = sources.length ? `${formatSourceNames(sources.map((source) => source.name))}，合并 ${number.format(rows.value.length)} 行订单商品数据` : "没有选择订单文件";
   if (!periods.value.includes(filters.period)) filters.period = "all";
   await nextTick();
@@ -932,8 +981,9 @@ async function uploadOrderFiles(event) {
     return;
   }
   const sources = await Promise.all(files.map(async (file) => ({ name: file.name, text: await readSheetFile(file) })));
-  rows.value = dedupeOrderRows(sources.flatMap((source) => normalizeCsvSource(source.text, source.name)));
-  allOrderRows.value = dedupeOrderRows(sources.flatMap((source) => normalizeCsvSource(source.text, source.name, { includeRefunded: true })));
+  const parsedRows = dedupeOrderRows(sources.flatMap((source) => normalizeCsvSource(source.text, source.name, { includeRefunded: true })));
+  allOrderRows.value = parsedRows;
+  rows.value = parsedRows.filter((row) => !isRefundedOrder(row));
   externalRefundRows.value = [];
   orderFiles.value = sources.map((source) => ({ name: source.name, size: source.text.length, updatedAt: new Date().toISOString() }));
   selectedOrderFiles.value = sources.map((source) => source.name);
@@ -983,7 +1033,7 @@ function dataUrl(type, name) {
 async function fetchText(url) {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`读取失败：${url}`);
-  return response.text();
+  return decodeTextBuffer(await response.arrayBuffer());
 }
 
 async function loadInventoryUpload(event) {
@@ -1258,7 +1308,7 @@ function parseInventoryItems(text) {
     if (!model || isAccessoryText(model)) return;
     const warehouse = warehouseIndex >= 0 ? String(row[warehouseIndex] || "").trim() : inferWarehouse(rawModel);
     const powerSpec = normalizePowerSpec(powerSpecIndex >= 0 ? row[powerSpecIndex] : inferPowerSpec(warehouse || rawModel));
-    const productionStatus = normalizeProductionStatus(statusIndex >= 0 ? row[statusIndex] : "") || "停产/不备货";
+    const productionStatus = normalizeProductionStatus(statusIndex >= 0 ? row[statusIndex] : "");
     const stock = qtyIndex >= 0 ? toNumber(row[qtyIndex]) : 0;
     const market = warehouseToMarket(warehouse);
     const previous = map.get(`${model}:${warehouse}:${powerSpec}`) || { model, warehouse, market, powerSpec, productionStatus, stock: 0 };
@@ -1286,6 +1336,7 @@ function wideInventoryRows(records, normalModels = new Set()) {
   if (!records.length) return [];
   const headers = records[0].map((cell) => String(cell || "").trim());
   const modelIndex = headers.findIndex((header) => /商务统一型号|型号|产品/.test(header));
+  const statusIndex = headers.findIndex((header) => /在产状态|生产状态|机型状态|状态|status/i.test(header));
   const specIndexes = [
     { powerSpec: "美规", warehouse: "美国仓库", index: headers.findIndex((header) => header === "美规") },
     { powerSpec: "欧规", warehouse: "德国仓库", index: headers.findIndex((header) => header === "欧规") },
@@ -1295,7 +1346,7 @@ function wideInventoryRows(records, normalModels = new Set()) {
   return records.slice(1).flatMap((record) => {
     const model = normalizeModelKey(record[modelIndex]);
     if (!model || model === "部门" || isAccessoryText(model)) return [];
-    const productionStatus = normalModels.has(model) ? "正常" : "停产/不备货";
+    const productionStatus = normalizeProductionStatus(statusIndex >= 0 ? record[statusIndex] : "") || (normalModels.has(model) ? "正常" : "停产/不备货");
     return specIndexes.map((spec) => ({ model, warehouse: spec.warehouse, powerSpec: spec.powerSpec, stock: toNumber(record[spec.index]), productionStatus }));
   });
 }
@@ -1310,7 +1361,19 @@ function isSupportedUpload(file) {
 }
 
 async function readSheetFile(file) {
-  return file.text();
+  return decodeTextBuffer(await file.arrayBuffer());
+}
+
+function decodeTextBuffer(buffer) {
+  const bytes = new Uint8Array(buffer);
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return new TextDecoder("utf-8").decode(bytes.subarray(3));
+  const utf8 = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  if (!utf8.includes("\uFFFD")) return utf8;
+  try {
+    return new TextDecoder("gb18030").decode(bytes);
+  } catch {
+    return utf8;
+  }
 }
 
 function drawShareChart() {
@@ -1563,11 +1626,15 @@ function isRefundedOrder(row) {
 }
 
 function normalizeModelKey(value) {
-  return String(value || "").split(/[+＋]/)[0].trim().replace(/^BL\//i, "").replace(/[（(].*?[）)]/g, "").replace(/_[HUK]$/i, "").split("/").map((part) => part.replace(/[_-]?[A-Z]??(美规|欧规|英规|日规|澳规|加拿大规|国规)$/i, "").trim()).filter((part) => part && !/(美规|欧规|英规|日规|澳规|加拿大规|国规)/i.test(part)).join("/");
+  return normalizeModelDisplay(String(value || "").split(/[+＋]/)[0].trim().replace(/^BL\//i, "").replace(/[（(].*?[）)]/g, "").replace(/_[HUK]$/i, "").split("/").map((part) => part.replace(/[_-]?[A-Z]??(美规|欧规|英规|日规|澳规|加拿大规|国规)$/i, "").trim()).filter((part) => part && !/(美规|欧规|英规|日规|澳规|加拿大规|国规)/i.test(part)).join("/"));
 }
 
 function modelMatchKey(value) {
   return normalizeModelKey(value).toLocaleUpperCase("en-US").replace(/\s+/g, " ").trim();
+}
+
+function normalizeModelDisplay(value) {
+  return String(value || "").replace(/\bGTI(?=\d)/gi, "GTi");
 }
 
 function getThursdayWeek(date) {
@@ -1846,11 +1913,10 @@ function warehouseToMarket(warehouse) {
 
 function normalizeProductionStatus(value) {
   const text = String(value || "").trim();
+  if (!text || text === "0" || text === "-") return "停产/不备货";
   if (/停产\/不备货|停产.*不备货|不备货.*停产/.test(text)) return "停产/不备货";
-  if (/停产/.test(text)) return "停产";
-  if (/不备货/.test(text)) return "不备货";
   if (/正常/.test(text)) return "正常";
-  return text;
+  return "停产/不备货";
 }
 
 function inventoryTooltip(item) {
@@ -1888,22 +1954,23 @@ function saleGapInfo(model) {
 function rowsForModel(model, powerSpec = "") {
   const key = modelMatchKey(model);
   const spec = powerSpec ? normalizePowerSpec(powerSpec) : "";
-  return rows.value.filter((row) => {
-    if (modelMatchKey(row.model) !== key) return false;
+  const modelRows = rowsByModelKey.value.get(key) || [];
+  if (!spec) return modelRows;
+  return modelRows.filter((row) => {
     if (!spec) return true;
     return normalizePowerSpec(row.powerSpec || row.sku || row.fullName) === spec;
   });
 }
 
 function recentSalesInfo(model, powerSpec = "") {
-  const reference = latestOrderDate.value || new Date();
-  const cutoff = new Date(reference);
-  cutoff.setDate(cutoff.getDate() - 90);
-  const modelRows = rowsForModel(model, powerSpec).filter((row) => row.createdAt && !Number.isNaN(row.createdAt.getTime()));
-  const recentRows = modelRows.filter((row) => row.createdAt >= cutoff && row.createdAt <= reference);
-  const recentUnits = sum(recentRows, "quantity");
-  const latestSaleDate = modelRows.map((row) => row.dateKey).filter(Boolean).sort((a, b) => b.localeCompare(a))[0] || "";
-  return { recentUnits, latestSaleDate };
+  if (!powerSpec) {
+    const details = ["美规", "欧规", "英规", "未标注电源"].map((spec) => recentSalesByModelSpec.value.get(`${modelMatchKey(model)}::${spec}`)).filter(Boolean);
+    return {
+      recentUnits: sum(details, "recentUnits"),
+      latestSaleDate: details.map((item) => item.latestSaleDate).filter(Boolean).sort((a, b) => b.localeCompare(a))[0] || "",
+    };
+  }
+  return recentSalesByModelSpec.value.get(`${modelMatchKey(model)}::${normalizePowerSpec(powerSpec)}`) || { recentUnits: 0, latestSaleDate: "" };
 }
 
 function slowMovingInfo(model, detailRows = []) {
@@ -1935,17 +2002,15 @@ function daysBetween(startText, endText) {
 }
 
 function modelPriceChange(model) {
-  const points = changedPricePoints(modelPricePoints(model));
-  if (points.length < 2) return "暂无变化";
-  const lines = points.map((point) => `${point.dateKey} ${decimalMoney.format(point.avgPrice)}`);
-  const first = points[0];
-  const last = points[points.length - 1];
-  const summary = `总变化 ${formatChange(changeRate(last.avgPrice, first.avgPrice))}`;
-  return `${summary}\n${lines.join("\n")}`;
+  return priceChangeByModelKey.value.get(modelMatchKey(model)) || "暂无变化";
 }
 
 function modelPricePoints(model) {
-  return groupBy(rowsForModel(model).filter((row) => row.dateKey), "dateKey")
+  return pricePointsFromRows(rowsForModel(model));
+}
+
+function pricePointsFromRows(items) {
+  return groupBy(items.filter((row) => row.dateKey), "dateKey")
     .map(([dateKey, group]) => ({
       dateKey,
       units: sum(group, "quantity"),
