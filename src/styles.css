@@ -822,6 +822,12 @@ button {
   gap: 14px;
 }
 
+.inventory-filter-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .inventory-subsection {
   display: grid;
   gap: 10px;

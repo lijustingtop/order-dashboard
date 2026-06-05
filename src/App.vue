@@ -417,6 +417,30 @@
               <input v-model="inventorySearch" type="search" list="modelSuggestions" placeholder="搜索库存机型..." />
             </label>
           </header>
+          <div class="inventory-filter-row">
+            <div class="sort-control" aria-label="库存状态筛选">
+              <button
+                v-for="option in inventoryStatusOptions"
+                :key="option.value"
+                :class="{ 'is-active': inventoryStatusFilter === option.value }"
+                type="button"
+                @click="inventoryStatusFilter = option.value"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+            <div class="sort-control" aria-label="仓库筛选">
+              <button
+                v-for="option in inventoryWarehouseOptions"
+                :key="option.value"
+                :class="{ 'is-active': inventoryWarehouseFilter === option.value }"
+                type="button"
+                @click="inventoryWarehouseFilter = option.value"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </div>
           <span>{{ inventoryHint }}</span>
           <div class="inventory-section-list">
             <section v-for="group in inventoryGroups" :key="group.key" class="inventory-subsection">
@@ -432,8 +456,6 @@
               <div class="inventory-grid" :class="{ 'is-scrollable': expandedInventoryGroups.includes(group.key) }">
                 <article v-for="item in visibleInventoryItems(group)" :key="item.key" class="inventory-card" :title="inventoryTooltip(item)" @click="openModelTrend(item.model)">
                   <button class="model-link inventory-model-link" type="button" @click.stop="openModelTrend(item.model)">{{ item.model }}</button>
-                  <span>库存 {{ number.format(item.stock) }} · 已售 {{ number.format(item.units) }}</span>
-                  <small>{{ item.powerSpec }} · {{ item.warehouse || "未指定仓库" }} · {{ item.market || "未映射市场" }}</small>
                 </article>
               </div>
             </section>
@@ -452,10 +474,10 @@
           <div class="inventory-grid">
             <article v-for="item in staleInventoryRows" :key="item.model" class="inventory-card is-warning" :title="inventoryTooltip(item)" @click="openModelTrend(item.model)">
               <button class="model-link inventory-model-link" type="button" @click.stop="openModelTrend(item.model)">{{ item.model }}</button>
-              <span>库存 {{ number.format(item.stock) }} · 最近两次销售间隔 {{ item.saleGapDays }} 天</span>
-              <small>{{ item.productionStatus || "未标注状态" }} · {{ item.powerSpec }}</small>
+              <span>库存 {{ number.format(item.stock) }} · 90天销量 {{ number.format(item.recentUnits) }}</span>
+              <small>{{ item.productionStatus || "未标注状态" }} · {{ item.slowReason }}</small>
             </article>
-            <div v-if="!staleInventoryRows.length" class="empty">暂无满足“有库存且最近两次销售间隔超过 90 天”的机型。</div>
+            <div v-if="!staleInventoryRows.length" class="empty">暂无满足“有库存且90天无销售，或90天销量低于6台”的机型。</div>
           </div>
         </section>
       </section>
@@ -561,10 +583,12 @@ const allOrderRows = ref([]);
 const dataStatus = ref("正在读取订单数据");
 const orderFiles = ref([]);
 const inventoryFiles = ref([]);
+const refundFiles = ref([]);
 const selectedOrderFiles = ref([]);
 const ordersDir = ref("");
 const inventoryFileName = ref("");
 const inventoryItems = ref([]);
+const externalRefundRows = ref([]);
 const sortBy = ref("units");
 const shareBy = ref("units");
 const activeView = ref("overview");
@@ -576,6 +600,8 @@ const overviewSearch = ref("");
 const trendSearch = ref("");
 const inventorySearch = ref("");
 const expandedInventoryGroups = ref([]);
+const inventoryStatusFilter = ref("all");
+const inventoryWarehouseFilter = ref("all");
 const rankingMode = ref("country");
 const expandedRankingKey = ref("");
 const expandedCustomerKey = ref("");
@@ -604,6 +630,7 @@ const countryOptions = computed(() => {
 const modelSuggestions = computed(() => [...new Set([...rows.value.map((row) => row.model), ...BEELINK_MODELS])].sort((a, b) => a.localeCompare(b)));
 const periods = computed(() => [...new Set(rows.value.map((row) => row[timeKey.value]))].filter(Boolean).sort().reverse());
 const timeKey = computed(() => (filters.timeMode === "year" ? "year" : filters.timeMode === "quarter" ? "quarter" : filters.timeMode === "month" ? "month" : "week"));
+const latestOrderDate = computed(() => rows.value.reduce((latest, row) => row.createdAt && (!latest || row.createdAt > latest) ? row.createdAt : latest, null));
 
 const filteredRows = computed(() => rows.value.filter((row) => {
   const query = overviewSearch.value.trim().toLowerCase();
@@ -787,23 +814,65 @@ const customerRows = computed(() => summarizeCustomers(customerBaseRows.value)
   .slice(0, 10)
   .map((item, index) => ({ ...item, rank: index + 1 })));
 const filteredAllOrderRows = computed(() => allOrderRows.value.filter((row) => matchesGlobalFilters(row)));
-const refundRows = computed(() => summarizeRefundOrders(filteredAllOrderRows.value).sort((a, b) => b.dateKey.localeCompare(a.dateKey)));
+const orderLookup = computed(() => new Map(allOrderRows.value.filter((row) => row.order).map((row) => [row.order, row])));
+const enrichedExternalRefundRows = computed(() => externalRefundRows.value.map((row) => {
+  const matched = orderLookup.value.get(row.order);
+  return {
+    ...row,
+    customerName: row.customerName || matched?.customerName || "未知客户",
+    countryName: row.countryName || matched?.countryName || "",
+    dateKey: row.dateKey || matched?.dateKey || "",
+    createdAt: row.createdAt || matched?.createdAt,
+    year: row.year || matched?.year || "",
+    quarter: row.quarter || matched?.quarter || "",
+    month: row.month || matched?.month || "",
+    week: row.week || matched?.week || "",
+  };
+}));
+const filteredExternalRefundRows = computed(() => enrichedExternalRefundRows.value.filter((row) => matchesRefundFilters(row)));
+const refundRows = computed(() => summarizeRefundOrders(filteredAllOrderRows.value, filteredExternalRefundRows.value).sort((a, b) => b.dateKey.localeCompare(a.dateKey)));
 const refundTotal = computed(() => sum(refundRows.value, "refundedAmount"));
 const couponRows = computed(() => summarizeCoupons(filteredAllOrderRows.value));
 const couponTotal = computed(() => sum(couponRows.value, "amount"));
 const inventoryHint = computed(() => inventoryFileName.value ? `${inventoryFileName.value} · ${number.format(inventoryRows.value.length)} 个库存机型` : "等待库存表；支持型号、数量、仓库列。");
+const inventoryStatusOptions = computed(() => [
+  { value: "all", label: "全部状态" },
+  { value: "正常", label: "正常" },
+  { value: "停产/不备货", label: "停产/不备货" },
+]);
+const inventoryWarehouseOptions = computed(() => {
+  const options = [...new Set(inventoryItems.value.map((item) => item.warehouse || "未指定仓库"))].sort();
+  return [{ value: "all", label: "全部仓库" }, ...options.map((item) => ({ value: item, label: item }))];
+});
 const inventoryRows = computed(() => {
   const sold = new Map(summarizeModels(rows.value).map((item) => [item.model, item]));
   const query = inventorySearch.value.trim().toLowerCase();
-  return inventoryItems.value.map((item) => {
-    const soldItem = sold.get(item.model) || { units: 0, sales: 0, avgPrice: 0 };
-    return { ...item, key: `${item.productionStatus}:${item.powerSpec}:${item.model}:${item.warehouse}`, units: soldItem.units, sales: soldItem.sales, avgPrice: soldItem.avgPrice, ...saleGapInfo(item.model) };
-  }).filter((item) => !query || item.model.toLowerCase().includes(query) || item.powerSpec.toLowerCase().includes(query));
+  const filteredInventory = inventoryItems.value.filter((item) => {
+    if (inventoryStatusFilter.value !== "all" && item.productionStatus !== inventoryStatusFilter.value) return false;
+    if (inventoryWarehouseFilter.value !== "all" && (item.warehouse || "未指定仓库") !== inventoryWarehouseFilter.value) return false;
+    return !query || item.model.toLowerCase().includes(query);
+  });
+  return groupBy(filteredInventory, "model").map(([model, items]) => {
+    const soldItem = sold.get(model) || { units: 0, sales: 0, avgPrice: 0 };
+    const productionStatus = items.some((item) => item.productionStatus === "正常") ? "正常" : "停产/不备货";
+    const detailRows = items.slice().sort((a, b) => powerSpecOrder(a.powerSpec) - powerSpecOrder(b.powerSpec) || a.warehouse.localeCompare(b.warehouse));
+    return {
+      model,
+      key: `${productionStatus}:${model}`,
+      productionStatus,
+      stock: sum(items, "stock"),
+      detailRows,
+      units: soldItem.units,
+      sales: soldItem.sales,
+      avgPrice: soldItem.avgPrice,
+      ...slowMovingInfo(model),
+    };
+  }).sort((a, b) => b.stock - a.stock || a.model.localeCompare(b.model));
 });
-const staleInventoryRows = computed(() => inventoryRows.value.filter((item) => item.stock > 0 && item.saleGapDays > 90));
+const staleInventoryRows = computed(() => inventoryRows.value.filter((item) => item.stock > 0 && item.isSlowMoving));
 const inventoryGroups = computed(() => {
   const order = { "正常": 0, "停产/不备货": 1 };
-  return groupBy(inventoryRows.value, (item) => `${item.productionStatus || "停产/不备货"}::${item.powerSpec || "未标注电源"}`)
+  return groupBy(inventoryRows.value, (item) => `${item.productionStatus || "停产/不备货"}::机型`)
     .map(([key, items]) => {
       const [status, powerSpec] = key.split("::");
       return {
@@ -814,7 +883,7 @@ const inventoryGroups = computed(() => {
         items: items.slice().sort((a, b) => b.stock - a.stock || a.model.localeCompare(b.model)),
       };
     })
-    .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || powerSpecOrder(a.powerSpec) - powerSpecOrder(b.powerSpec) || b.totalStock - a.totalStock);
+    .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || b.totalStock - a.totalStock);
 });
 
 watch([marketShare, shareBy, shareCanvas], () => nextTick(drawShareChart), { deep: true });
@@ -825,9 +894,11 @@ async function refreshFiles() {
   const payload = await loadFileManifest();
   orderFiles.value = payload.orders;
   inventoryFiles.value = payload.inventory || [];
+  refundFiles.value = payload.refunds || [];
   ordersDir.value = payload.ordersDir;
   selectedOrderFiles.value = payload.orders.map((file) => file.name);
   await loadSelectedOrders();
+  await loadRefundFiles();
   const latestInventory = [...(payload.inventory || [])].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0];
   if (latestInventory) await loadInventoryFromServer(latestInventory.name);
 }
@@ -841,6 +912,11 @@ async function loadSelectedOrders() {
   await nextTick();
   drawShareChart();
   drawTrendChart();
+}
+
+async function loadRefundFiles() {
+  const sources = await Promise.all(refundFiles.value.map(async (file) => ({ name: file.name, text: await fetchText(dataUrl("refunds", file.name)) })));
+  externalRefundRows.value = sources.flatMap((source) => normalizeRefundSource(source.text, source.name));
 }
 
 async function uploadOrderFiles(event) {
@@ -857,6 +933,7 @@ async function uploadOrderFiles(event) {
   const sources = await Promise.all(files.map(async (file) => ({ name: file.name, text: await readSheetFile(file) })));
   rows.value = dedupeOrderRows(sources.flatMap((source) => normalizeCsvSource(source.text, source.name)));
   allOrderRows.value = dedupeOrderRows(sources.flatMap((source) => normalizeCsvSource(source.text, source.name, { includeRefunded: true })));
+  externalRefundRows.value = [];
   orderFiles.value = sources.map((source) => ({ name: source.name, size: source.text.length, updatedAt: new Date().toISOString() }));
   selectedOrderFiles.value = sources.map((source) => source.name);
   dataStatus.value = `${formatSourceNames(sources.map((source) => source.name))}，临时读取 ${number.format(rows.value.length)} 行订单商品数据`;
@@ -895,7 +972,9 @@ async function loadFileManifest() {
 function dataUrl(type, name) {
   const encoded = encodeURIComponent(name);
   if (dataMode.value === "api") {
-    return type === "inventory" ? `/api/inventory/${encoded}` : `/api/orders/${encoded}`;
+    if (type === "inventory") return `/api/inventory/${encoded}`;
+    if (type === "refunds") return `/api/refunds/${encoded}`;
+    return `/api/orders/${encoded}`;
   }
   return `${staticBase}data/${type}/${encoded}`;
 }
@@ -928,6 +1007,8 @@ function resetFilters() {
   overviewSearch.value = "";
   trendSearch.value = "";
   inventorySearch.value = "";
+  inventoryStatusFilter.value = "all";
+  inventoryWarehouseFilter.value = "all";
   expandedRankingKey.value = "";
 }
 
@@ -971,6 +1052,12 @@ function matchesNonPeriodFilters(row) {
 function matchesGlobalFilters(row) {
   if (filters.period !== "all" && row[timeKey.value] !== filters.period) return false;
   return matchesNonPeriodFilters(row);
+}
+
+function matchesRefundFilters(row) {
+  if (filters.period !== "all" && row[timeKey.value] !== filters.period) return false;
+  if (filters.country !== "all" && row.countryName && row.countryName !== filters.country) return false;
+  return true;
 }
 
 function matchesCountryRankingFilters(row) {
@@ -1050,6 +1137,51 @@ function normalizeRow(headers, values, fallbackCountry, fallbackOrderMeta) {
     sales: quantity * price,
     orderTotal: toNumber(source.Total),
   };
+}
+
+function normalizeRefundSource(text, sourceName) {
+  const records = parseCsv(text);
+  const [headers, ...body] = records;
+  if (!headers?.length) return [];
+  const map = new Map();
+  body.forEach((values) => {
+    const source = Object.fromEntries(headers.map((header, index) => [header, values[index] || ""]));
+    const order = source.Name || source["Order Name"] || source["订单号"] || "";
+    if (!order) return;
+    const transactionAmount = toNumber(source["Transaction: Amount"]);
+    const refundedAmount = toNumber(source["Refunded Amount"] || source["退款金额"]);
+    const refundDate = parseShopifyDate(source["Refund: Created At"] || source["Created at"] || source["退款时间"]);
+    const reason = source["Refund: Note"] || source.Reason || source["退款理由"] || "";
+    const sku = source["Line: SKU"] || source["Lineitem sku"] || "";
+    const previous = map.get(order) || {
+      order,
+      dateKey: refundDate && !Number.isNaN(refundDate.getTime()) ? formatDate(refundDate) : "",
+      createdAt: refundDate,
+      year: refundDate && !Number.isNaN(refundDate.getTime()) ? String(refundDate.getFullYear()) : "",
+      quarter: refundDate && !Number.isNaN(refundDate.getTime()) ? `${refundDate.getFullYear()} Q${Math.floor(refundDate.getMonth() / 3) + 1}` : "",
+      month: refundDate && !Number.isNaN(refundDate.getTime()) ? `${refundDate.getFullYear()}-${String(refundDate.getMonth() + 1).padStart(2, "0")}` : "",
+      week: refundDate && !Number.isNaN(refundDate.getTime()) ? getThursdayWeek(refundDate) : "",
+      customerName: "",
+      refundedAmount: 0,
+      reason: "",
+      sourceFile: sourceName,
+      sku,
+    };
+    if (transactionAmount < 0) previous.refundedAmount += Math.abs(transactionAmount);
+    if (!source["Transaction: Amount"] && refundedAmount > 0) previous.refundedAmount = Math.max(previous.refundedAmount, refundedAmount);
+    if (refundDate && !Number.isNaN(refundDate.getTime()) && (!previous.createdAt || refundDate > previous.createdAt)) {
+      previous.createdAt = refundDate;
+      previous.dateKey = formatDate(refundDate);
+      previous.year = String(refundDate.getFullYear());
+      previous.quarter = `${refundDate.getFullYear()} Q${Math.floor(refundDate.getMonth() / 3) + 1}`;
+      previous.month = `${refundDate.getFullYear()}-${String(refundDate.getMonth() + 1).padStart(2, "0")}`;
+      previous.week = getThursdayWeek(refundDate);
+    }
+    previous.reason = previous.reason || reason;
+    previous.sku = previous.sku || sku;
+    map.set(order, previous);
+  });
+  return [...map.values()].filter((item) => item.refundedAmount > 0);
 }
 
 function getCountryName(country) {
@@ -1514,7 +1646,7 @@ function countrySummaryToTrend(item) {
   return { name: item.country, units: item.units, sales: item.sales, avgPrice: item.units ? item.sales / item.units : 0 };
 }
 
-function summarizeRefundOrders(items) {
+function summarizeRefundOrders(items, refundItems = []) {
   const map = new Map();
   items.filter((item) => item.refundedAmount > 0 || isRefundedOrder(item)).forEach((item) => {
     const key = item.order || `${item.email}:${item.dateKey}:${item.refundedAmount}`;
@@ -1527,6 +1659,28 @@ function summarizeRefundOrders(items) {
     };
     previous.refundedAmount = Math.max(previous.refundedAmount, item.refundedAmount || 0);
     previous.reason = previous.reason || item.refundReason;
+    previous.countryName = previous.countryName || item.countryName;
+    previous.createdAt = previous.createdAt || item.createdAt;
+    map.set(key, previous);
+  });
+  const orderLookup = new Map(items.filter((item) => item.order).map((item) => [item.order, item]));
+  refundItems.forEach((item) => {
+    const matchedOrder = orderLookup.get(item.order);
+    const key = item.order || `${item.dateKey}:${item.refundedAmount}`;
+    const previous = map.get(key) || {
+      order: item.order || "未知订单",
+      dateKey: item.dateKey || matchedOrder?.dateKey || "",
+      customerName: matchedOrder?.customerName || item.customerName || "未知客户",
+      refundedAmount: 0,
+      reason: "",
+      countryName: matchedOrder?.countryName || item.countryName || "",
+      createdAt: item.createdAt || matchedOrder?.createdAt,
+    };
+    previous.refundedAmount = Math.max(previous.refundedAmount || 0, item.refundedAmount || 0);
+    previous.reason = previous.reason || item.reason || matchedOrder?.refundReason || "";
+    previous.dateKey = item.dateKey || previous.dateKey || matchedOrder?.dateKey || "";
+    previous.customerName = previous.customerName || matchedOrder?.customerName || item.customerName || "未知客户";
+    previous.countryName = previous.countryName || matchedOrder?.countryName || "";
     map.set(key, previous);
   });
   return [...map.values()].filter((item) => item.refundedAmount > 0);
@@ -1684,7 +1838,10 @@ function normalizeProductionStatus(value) {
 function inventoryTooltip(item) {
   const price = item.avgPrice ? `均价 ${decimalMoney.format(item.avgPrice)}` : "暂无成交均价";
   const priceChange = modelPriceChange(item.model);
-  return `${item.model}\n${item.productionStatus} · ${item.powerSpec}\n${price}\n单价变化 ${priceChange}\n库存 ${number.format(item.stock)}\n已售 ${number.format(item.units)} 件`;
+  const stockLines = (item.detailRows || [])
+    .map((detail) => `${detail.warehouse || "未指定仓库"} · ${detail.powerSpec}: ${number.format(detail.stock)}`)
+    .join("\n");
+  return `${item.model}\n${item.productionStatus}\n库存\n${stockLines || "暂无库存"}\n90天销量 ${number.format(item.recentUnits || 0)}\n${price}\n单价变化 ${priceChange}`;
 }
 
 function modelInfoTitle(model) {
@@ -1708,6 +1865,23 @@ function saleGapInfo(model) {
   if (dates.length < 2) return { saleGapDays: 0, latestSaleDate: dates[0] || "", previousSaleDate: "" };
   const gap = daysBetween(dates[1], dates[0]);
   return { saleGapDays: gap, latestSaleDate: dates[0], previousSaleDate: dates[1] };
+}
+
+function slowMovingInfo(model) {
+  const reference = latestOrderDate.value || new Date();
+  const cutoff = new Date(reference);
+  cutoff.setDate(cutoff.getDate() - 90);
+  const modelRows = rows.value.filter((row) => row.model === model && row.createdAt && !Number.isNaN(row.createdAt.getTime()));
+  const recentRows = modelRows.filter((row) => row.createdAt >= cutoff && row.createdAt <= reference);
+  const recentUnits = sum(recentRows, "quantity");
+  const latestSaleDate = modelRows.map((row) => row.dateKey).filter(Boolean).sort((a, b) => b.localeCompare(a))[0] || "";
+  const noRecentSales = recentUnits === 0;
+  return {
+    recentUnits,
+    latestSaleDate,
+    isSlowMoving: noRecentSales || recentUnits < 6,
+    slowReason: noRecentSales ? "90天内无销售" : "90天内销量低于6台",
+  };
 }
 
 function daysBetween(startText, endText) {

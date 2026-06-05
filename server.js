@@ -10,9 +10,11 @@ const app = express();
 const port = Number(process.env.PORT || 5173);
 const ordersDir = path.resolve(process.env.ORDER_DATA_DIR || path.join(__dirname, "data", "orders"));
 const inventoryDir = path.resolve(process.env.INVENTORY_DATA_DIR || path.join(__dirname, "data", "inventory"));
+const refundsDir = path.resolve(process.env.REFUND_DATA_DIR || path.join(__dirname, "data", "refunds"));
 
 await fs.mkdir(ordersDir, { recursive: true });
 await fs.mkdir(inventoryDir, { recursive: true });
+await fs.mkdir(refundsDir, { recursive: true });
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -23,12 +25,14 @@ const upload = multer({
 });
 
 app.get("/api/files", async (_req, res) => {
-  const [orders, inventory] = await Promise.all([listCsvFiles(ordersDir), listCsvFiles(inventoryDir)]);
+  const [orders, inventory, refunds] = await Promise.all([listCsvFiles(ordersDir), listCsvFiles(inventoryDir), listCsvFiles(refundsDir)]);
   res.json({
     orders,
     inventory,
+    refunds,
     ordersDir,
     inventoryDir,
+    refundsDir,
   });
 });
 
@@ -39,6 +43,11 @@ app.get("/api/orders/:name", async (req, res) => {
 
 app.get("/api/inventory/:name", async (req, res) => {
   const filePath = resolveInside(inventoryDir, req.params.name);
+  res.type("text/csv").send(await fs.readFile(filePath, "utf8"));
+});
+
+app.get("/api/refunds/:name", async (req, res) => {
+  const filePath = resolveInside(refundsDir, req.params.name);
   res.type("text/csv").send(await fs.readFile(filePath, "utf8"));
 });
 
