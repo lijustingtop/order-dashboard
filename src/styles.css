@@ -817,6 +817,59 @@ button {
   gap: 12px;
 }
 
+.inventory-section-list {
+  display: grid;
+  gap: 14px;
+}
+
+.inventory-subsection {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fcfdfc;
+}
+
+.inventory-subhead {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.inventory-subhead div {
+  display: grid;
+  gap: 3px;
+}
+
+.inventory-subhead strong {
+  font-size: 15px;
+}
+
+.inventory-subhead span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.inventory-subhead button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.inventory-grid.is-scrollable {
+  max-height: 560px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
 .inventory-card {
   display: grid;
   gap: 7px;

@@ -8,7 +8,7 @@
       </div>
 
       <label class="file-drop">
-        <input type="file" accept=".csv,.xlsx,.xls,text/csv" multiple @change="uploadOrderFiles" />
+        <input type="file" accept=".csv,text/csv" multiple @change="uploadOrderFiles" />
         <span>上传订单文件</span>
       </label>
 
@@ -391,7 +391,7 @@
               <h3>库存和未出售机型</h3>
             </div>
             <label class="mini-upload">
-              <input type="file" accept=".csv,.xlsx,.xls,.txt,text/csv,text/plain" @change="loadInventoryUpload" />
+              <input type="file" accept=".csv,.txt,text/csv,text/plain" @change="loadInventoryUpload" />
               <span>上传库存表</span>
             </label>
           </div>
@@ -418,12 +418,25 @@
             </label>
           </header>
           <span>{{ inventoryHint }}</span>
-          <div class="inventory-grid">
-            <article v-for="item in inventoryRows" :key="item.model" class="inventory-card" :title="inventoryTooltip(item)" @click="openModelTrend(item.model)">
-              <button class="model-link inventory-model-link" type="button" @click.stop="openModelTrend(item.model)">{{ item.model }}</button>
-              <span>库存 {{ number.format(item.stock) }} · 已售 {{ number.format(item.units) }}</span>
-              <small>{{ item.warehouse || "未指定仓库" }} · {{ item.market || "未映射市场" }} · {{ item.productionStatus || "未标注状态" }}</small>
-            </article>
+          <div class="inventory-section-list">
+            <section v-for="group in inventoryGroups" :key="group.key" class="inventory-subsection">
+              <div class="inventory-subhead">
+                <div>
+                  <strong>{{ group.status }} · {{ group.powerSpec }}</strong>
+                  <span>{{ number.format(group.totalStock) }} 件库存 · {{ number.format(group.items.length) }} 个机型</span>
+                </div>
+                <button v-if="group.items.length > 10" type="button" @click="toggleInventoryGroup(group.key)">
+                  {{ expandedInventoryGroups.includes(group.key) ? "收起" : "展开前20" }}
+                </button>
+              </div>
+              <div class="inventory-grid" :class="{ 'is-scrollable': expandedInventoryGroups.includes(group.key) }">
+                <article v-for="item in visibleInventoryItems(group)" :key="item.key" class="inventory-card" :title="inventoryTooltip(item)" @click="openModelTrend(item.model)">
+                  <button class="model-link inventory-model-link" type="button" @click.stop="openModelTrend(item.model)">{{ item.model }}</button>
+                  <span>库存 {{ number.format(item.stock) }} · 已售 {{ number.format(item.units) }}</span>
+                  <small>{{ item.powerSpec }} · {{ item.warehouse || "未指定仓库" }} · {{ item.market || "未映射市场" }}</small>
+                </article>
+              </div>
+            </section>
             <div v-if="!inventoryRows.length" class="empty">上传或选择库存表后显示库存；没有数量列时先按 0 库存展示。</div>
           </div>
         </section>
@@ -440,7 +453,7 @@
             <article v-for="item in staleInventoryRows" :key="item.model" class="inventory-card is-warning" :title="inventoryTooltip(item)" @click="openModelTrend(item.model)">
               <button class="model-link inventory-model-link" type="button" @click.stop="openModelTrend(item.model)">{{ item.model }}</button>
               <span>库存 {{ number.format(item.stock) }} · 最近两次销售间隔 {{ item.saleGapDays }} 天</span>
-              <small>{{ item.productionStatus || "未标注状态" }}</small>
+              <small>{{ item.productionStatus || "未标注状态" }} · {{ item.powerSpec }}</small>
             </article>
             <div v-if="!staleInventoryRows.length" class="empty">暂无满足“有库存且最近两次销售间隔超过 90 天”的机型。</div>
           </div>
@@ -529,7 +542,6 @@
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
-import * as XLSX from "xlsx";
 
 const EU_COUNTRIES = new Set(["AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE"]);
 const COUNTRY_NAMES = { GB: "英国", UK: "英国", US: "美国" };
@@ -563,6 +575,7 @@ const countrySearch = ref("");
 const overviewSearch = ref("");
 const trendSearch = ref("");
 const inventorySearch = ref("");
+const expandedInventoryGroups = ref([]);
 const rankingMode = ref("country");
 const expandedRankingKey = ref("");
 const expandedCustomerKey = ref("");
@@ -784,10 +797,25 @@ const inventoryRows = computed(() => {
   const query = inventorySearch.value.trim().toLowerCase();
   return inventoryItems.value.map((item) => {
     const soldItem = sold.get(item.model) || { units: 0, sales: 0, avgPrice: 0 };
-    return { ...item, units: soldItem.units, sales: soldItem.sales, avgPrice: soldItem.avgPrice, ...saleGapInfo(item.model) };
-  }).filter((item) => !query || item.model.toLowerCase().includes(query));
+    return { ...item, key: `${item.productionStatus}:${item.powerSpec}:${item.model}:${item.warehouse}`, units: soldItem.units, sales: soldItem.sales, avgPrice: soldItem.avgPrice, ...saleGapInfo(item.model) };
+  }).filter((item) => !query || item.model.toLowerCase().includes(query) || item.powerSpec.toLowerCase().includes(query));
 });
 const staleInventoryRows = computed(() => inventoryRows.value.filter((item) => item.stock > 0 && item.saleGapDays > 90));
+const inventoryGroups = computed(() => {
+  const order = { "正常": 0, "停产/不备货": 1 };
+  return groupBy(inventoryRows.value, (item) => `${item.productionStatus || "停产/不备货"}::${item.powerSpec || "未标注电源"}`)
+    .map(([key, items]) => {
+      const [status, powerSpec] = key.split("::");
+      return {
+        key,
+        status,
+        powerSpec,
+        totalStock: sum(items, "stock"),
+        items: items.slice().sort((a, b) => b.stock - a.stock || a.model.localeCompare(b.model)),
+      };
+    })
+    .sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || powerSpecOrder(a.powerSpec) - powerSpecOrder(b.powerSpec) || b.totalStock - a.totalStock);
+});
 
 watch([marketShare, shareBy, shareCanvas], () => nextTick(drawShareChart), { deep: true });
 watch([trendPoints, trendCanvas], () => nextTick(drawTrendChart), { deep: true });
@@ -890,7 +918,7 @@ async function loadInventoryUpload(event) {
     return;
   }
   inventoryFileName.value = file.name;
-  inventoryItems.value = parseInventoryItems(await readInventoryFile(file));
+  inventoryItems.value = parseInventoryItems(await readSheetFile(file));
   event.target.value = "";
 }
 
@@ -914,6 +942,16 @@ function toggleRanking(key) {
 
 function toggleCustomer(key) {
   expandedCustomerKey.value = expandedCustomerKey.value === key ? "" : key;
+}
+
+function toggleInventoryGroup(key) {
+  expandedInventoryGroups.value = expandedInventoryGroups.value.includes(key)
+    ? expandedInventoryGroups.value.filter((item) => item !== key)
+    : [...expandedInventoryGroups.value, key];
+}
+
+function visibleInventoryItems(group) {
+  return group.items.slice(0, expandedInventoryGroups.value.includes(group.key) ? 20 : 10);
 }
 
 function openModelTrend(model) {
@@ -1076,6 +1114,7 @@ function parseInventoryItems(text) {
   const modelIndex = findHeaderIndex(headers, ["sku", "model", "型号", "商品型号", "lineitem sku", "product", "产品", "产品型号"]);
   const qtyIndex = findHeaderIndex(headers, ["quantity", "qty", "库存", "数量", "stock", "可售"]);
   const warehouseIndex = findHeaderIndex(headers, ["warehouse", "仓库", "location", "库存地", "库房"]);
+  const powerSpecIndex = findHeaderIndex(headers, ["powerspec", "power spec", "电源", "规格", "电源规格"]);
   const statusIndex = findHeaderIndex(headers, ["在产状态", "生产状态", "机型状态", "状态", "status"]);
   const map = new Map();
   dataRows.forEach((row) => {
@@ -1083,13 +1122,14 @@ function parseInventoryItems(text) {
     const model = normalizeModelKey(rawModel);
     if (!model || isAccessoryText(model)) return;
     const warehouse = warehouseIndex >= 0 ? String(row[warehouseIndex] || "").trim() : inferWarehouse(rawModel);
+    const powerSpec = normalizePowerSpec(powerSpecIndex >= 0 ? row[powerSpecIndex] : inferPowerSpec(warehouse || rawModel));
     const productionStatus = normalizeProductionStatus(statusIndex >= 0 ? row[statusIndex] : "") || "停产/不备货";
     const stock = qtyIndex >= 0 ? toNumber(row[qtyIndex]) : 0;
     const market = warehouseToMarket(warehouse);
-    const previous = map.get(`${model}:${warehouse}`) || { model, warehouse, market, productionStatus, stock: 0 };
+    const previous = map.get(`${model}:${warehouse}:${powerSpec}`) || { model, warehouse, market, powerSpec, productionStatus, stock: 0 };
     previous.stock += stock;
     previous.productionStatus = previous.productionStatus || productionStatus;
-    map.set(`${model}:${warehouse}`, previous);
+    map.set(`${model}:${warehouse}:${powerSpec}`, previous);
   });
   return [...map.values()].sort((a, b) => a.model.localeCompare(b.model));
 }
@@ -1098,12 +1138,31 @@ function groupInventoryItems(items) {
   const map = new Map();
   items.forEach((item) => {
     const market = warehouseToMarket(item.warehouse);
-    const previous = map.get(`${item.model}:${item.warehouse}`) || { model: item.model, warehouse: item.warehouse, market, productionStatus: item.productionStatus, stock: 0 };
+    const powerSpec = normalizePowerSpec(item.powerSpec || inferPowerSpec(item.warehouse));
+    const previous = map.get(`${item.model}:${item.warehouse}:${powerSpec}`) || { model: item.model, warehouse: item.warehouse, market, powerSpec, productionStatus: item.productionStatus, stock: 0 };
     previous.stock += Number(item.stock || 0);
     previous.productionStatus = previous.productionStatus === "正常" || item.productionStatus === "正常" ? "正常" : previous.productionStatus || item.productionStatus;
-    map.set(`${item.model}:${item.warehouse}`, previous);
+    map.set(`${item.model}:${item.warehouse}:${powerSpec}`, previous);
   });
   return [...map.values()];
+}
+
+function wideInventoryRows(records, normalModels = new Set()) {
+  if (!records.length) return [];
+  const headers = records[0].map((cell) => String(cell || "").trim());
+  const modelIndex = headers.findIndex((header) => /商务统一型号|型号|产品/.test(header));
+  const specIndexes = [
+    { powerSpec: "美规", warehouse: "美国仓库", index: headers.findIndex((header) => header === "美规") },
+    { powerSpec: "欧规", warehouse: "德国仓库", index: headers.findIndex((header) => header === "欧规") },
+    { powerSpec: "英规", warehouse: "英国仓库", index: headers.findIndex((header) => header === "英规") },
+  ].filter((item) => item.index >= 0);
+  if (modelIndex < 0 || !specIndexes.length) return [];
+  return records.slice(1).flatMap((record) => {
+    const model = normalizeModelKey(record[modelIndex]);
+    if (!model || model === "部门" || isAccessoryText(model)) return [];
+    const productionStatus = normalModels.has(model) ? "正常" : "停产/不备货";
+    return specIndexes.map((spec) => ({ model, warehouse: spec.warehouse, powerSpec: spec.powerSpec, stock: toNumber(record[spec.index]), productionStatus }));
+  });
 }
 
 function findHeaderIndex(headers, keywords) {
@@ -1112,75 +1171,11 @@ function findHeaderIndex(headers, keywords) {
 
 function isSupportedUpload(file) {
   const name = file.name.toLowerCase();
-  return name.endsWith(".csv") || name.endsWith(".xlsx") || name.endsWith(".xls") || file.type.includes("csv") || file.type.includes("spreadsheet") || file.type.includes("excel");
+  return name.endsWith(".csv") || file.type.includes("csv") || file.type === "text/plain";
 }
 
 async function readSheetFile(file) {
-  const name = file.name.toLowerCase();
-  if (name.endsWith(".csv") || file.type.includes("csv")) return file.text();
-  const data = await file.arrayBuffer();
-  const workbook = XLSX.read(data, { type: "array" });
-  const firstSheet = workbook.SheetNames[0];
-  if (!firstSheet) return "";
-  return XLSX.utils.sheet_to_csv(workbook.Sheets[firstSheet]);
-}
-
-async function readInventoryFile(file) {
-  const name = file.name.toLowerCase();
-  if (name.endsWith(".csv") || file.type.includes("csv")) return file.text();
-  const data = await file.arrayBuffer();
-  const workbook = XLSX.read(data, { type: "array" });
-  return inventoryWorkbookToCsv(workbook);
-}
-
-function inventoryWorkbookToCsv(workbook) {
-  const inventorySheetName = workbook.SheetNames.find((name) => name.includes("库存")) || workbook.SheetNames[0];
-  const statusSheetName = workbook.SheetNames.find((name) => name.includes("正常机型"));
-  const inventoryRecords = XLSX.utils.sheet_to_json(workbook.Sheets[inventorySheetName], { header: 1, defval: "" });
-  const normalModels = statusSheetName ? normalModelSet(XLSX.utils.sheet_to_json(workbook.Sheets[statusSheetName], { header: 1, defval: "" })) : new Set();
-  const rows = wideInventoryRows(inventoryRecords, normalModels);
-  if (!rows.length) return XLSX.utils.sheet_to_csv(workbook.Sheets[inventorySheetName]);
-  return toCsv([["model", "warehouse", "stock", "productionStatus"], ...rows.map((row) => [row.model, row.warehouse, row.stock, row.productionStatus])]);
-}
-
-function normalModelSet(records) {
-  const set = new Set();
-  records.forEach((row) => {
-    const status = String(row[0] || "").trim();
-    const model = row.slice(1).find((cell) => String(cell || "").trim());
-    if (/正常/.test(status) && model) set.add(normalizeModelKey(model));
-  });
-  return set;
-}
-
-function wideInventoryRows(records, normalModels = new Set()) {
-  if (!records.length) return [];
-  const headers = records[0].map((cell) => String(cell || "").trim());
-  const modelIndex = headers.findIndex((header) => /商务统一型号|型号|产品/.test(header));
-  const specIndexes = [
-    { label: "美规", warehouse: "美国仓库", index: headers.findIndex((header) => header === "美规") },
-    { label: "欧规", warehouse: "德国仓库", index: headers.findIndex((header) => header === "欧规") },
-    { label: "英规", warehouse: "英国仓库", index: headers.findIndex((header) => header === "英规") },
-  ].filter((item) => item.index >= 0);
-  if (modelIndex < 0 || !specIndexes.length) return [];
-  const rows = [];
-  records.slice(1).forEach((record) => {
-    const rawModel = record[modelIndex];
-    const model = normalizeModelKey(rawModel);
-    if (!model || model === "部门" || isAccessoryText(model)) return;
-    const productionStatus = normalModels.has(model) ? "正常" : "停产/不备货";
-    specIndexes.forEach((spec) => {
-      rows.push({ model, warehouse: spec.warehouse, stock: toNumber(record[spec.index]), productionStatus });
-    });
-  });
-  return rows;
-}
-
-function toCsv(records) {
-  return records.map((row) => row.map((cell) => {
-    const text = String(cell ?? "");
-    return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-  }).join(",")).join("\n");
+  return file.text();
 }
 
 function drawShareChart() {
@@ -1648,6 +1643,26 @@ function inferWarehouse(value) {
   return "";
 }
 
+function inferPowerSpec(value) {
+  const text = String(value || "");
+  if (/美规|美国仓|_U\b|US/i.test(text)) return "美规";
+  if (/欧规|德国仓|_H\b|DE/i.test(text)) return "欧规";
+  if (/英规|英国仓|_K\b|UK|GB/i.test(text)) return "英规";
+  return "未标注电源";
+}
+
+function normalizePowerSpec(value) {
+  const text = String(value || "").trim();
+  if (/美规|美国|US/i.test(text)) return "美规";
+  if (/欧规|德国|DE/i.test(text)) return "欧规";
+  if (/英规|英国|UK|GB/i.test(text)) return "英规";
+  return text || "未标注电源";
+}
+
+function powerSpecOrder(value) {
+  return { "美规": 0, "欧规": 1, "英规": 2, "未标注电源": 3 }[value] ?? 9;
+}
+
 function warehouseToMarket(warehouse) {
   const text = String(warehouse || "").toLowerCase();
   if (!text || text.includes("自发货")) return "";
@@ -1659,6 +1674,7 @@ function warehouseToMarket(warehouse) {
 
 function normalizeProductionStatus(value) {
   const text = String(value || "").trim();
+  if (/停产\/不备货|停产.*不备货|不备货.*停产/.test(text)) return "停产/不备货";
   if (/停产/.test(text)) return "停产";
   if (/不备货/.test(text)) return "不备货";
   if (/正常/.test(text)) return "正常";
@@ -1668,19 +1684,22 @@ function normalizeProductionStatus(value) {
 function inventoryTooltip(item) {
   const price = item.avgPrice ? `均价 ${decimalMoney.format(item.avgPrice)}` : "暂无成交均价";
   const priceChange = modelPriceChange(item.model);
-  return `${item.model}\n${price}\n单价变化 ${priceChange}\n库存 ${number.format(item.stock)}\n已售 ${number.format(item.units)} 件`;
+  return `${item.model}\n${item.productionStatus} · ${item.powerSpec}\n${price}\n单价变化 ${priceChange}\n库存 ${number.format(item.stock)}\n已售 ${number.format(item.units)} 件`;
 }
 
 function modelInfoTitle(model) {
   if (!model) return "";
-  const stock = modelStockTotal(model);
-  return `${model}\n库存 ${number.format(stock)}\n单价变化\n${modelPriceChange(model)}`;
+  const stockLines = modelStockBreakdown(model);
+  return `${model}\n库存\n${stockLines || "暂无库存"}\n单价变化\n${modelPriceChange(model)}`;
 }
 
-function modelStockTotal(model) {
-  return inventoryItems.value
+function modelStockBreakdown(model) {
+  return groupBy(inventoryItems.value
     .filter((item) => item.model === model)
-    .reduce((total, item) => total + Number(item.stock || 0), 0);
+    .map((item) => ({ ...item, powerSpec: normalizePowerSpec(item.powerSpec || inferPowerSpec(item.warehouse)) })), "powerSpec")
+    .sort(([a], [b]) => powerSpecOrder(a) - powerSpecOrder(b))
+    .map(([powerSpec, items]) => `${powerSpec} ${number.format(sum(items, "stock"))}`)
+    .join("\n");
 }
 
 function saleGapInfo(model) {
@@ -1733,7 +1752,7 @@ function changedPricePoints(points) {
 function groupBy(items, key) {
   const map = new Map();
   items.forEach((item) => {
-    const value = item[key];
+    const value = typeof key === "function" ? key(item) : item[key];
     if (!map.has(value)) map.set(value, []);
     map.get(value).push(item);
   });
