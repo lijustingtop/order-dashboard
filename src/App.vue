@@ -845,7 +845,7 @@ const inventoryWarehouseOptions = computed(() => {
   return [{ value: "all", label: "全部仓库" }, ...options.map((item) => ({ value: item, label: item }))];
 });
 const inventoryRows = computed(() => {
-  const sold = new Map(summarizeModels(rows.value).map((item) => [item.model, item]));
+  const sold = summarizeModelsByMatchKey(rows.value);
   const query = inventorySearch.value.trim().toLowerCase();
   const filteredInventory = inventoryItems.value.filter((item) => {
     if (inventoryStatusFilter.value !== "all" && item.productionStatus !== inventoryStatusFilter.value) return false;
@@ -853,9 +853,10 @@ const inventoryRows = computed(() => {
     return !query || item.model.toLowerCase().includes(query);
   });
   return groupBy(filteredInventory, "model").map(([model, items]) => {
-    const soldItem = sold.get(model) || { units: 0, sales: 0, avgPrice: 0 };
+    const soldItem = sold.get(modelMatchKey(model)) || { units: 0, sales: 0, avgPrice: 0 };
     const productionStatus = items.some((item) => item.productionStatus === "正常") ? "正常" : "停产/不备货";
     const detailRows = items.slice().sort((a, b) => powerSpecOrder(a.powerSpec) - powerSpecOrder(b.powerSpec) || a.warehouse.localeCompare(b.warehouse));
+    const slowInfo = slowMovingInfo(model, detailRows);
     return {
       model,
       key: `${productionStatus}:${model}`,
@@ -865,7 +866,7 @@ const inventoryRows = computed(() => {
       units: soldItem.units,
       sales: soldItem.sales,
       avgPrice: soldItem.avgPrice,
-      ...slowMovingInfo(model),
+      ...slowInfo,
     };
   }).sort((a, b) => b.stock - a.stock || a.model.localeCompare(b.model));
 });
@@ -1107,6 +1108,7 @@ function normalizeRow(headers, values, fallbackCountry, fallbackOrderMeta) {
   const quantity = toNumber(source["Lineitem quantity"]);
   const price = toNumber(source["Lineitem price"]);
   const name = source["Lineitem name"] || "未命名商品";
+  const sku = source["Lineitem sku"];
   return {
     order: source.Name || fallbackOrderMeta.order || "",
     customerName: source["Billing Name"] || source["Shipping Name"] || source.Email || "未知客户",
@@ -1128,9 +1130,10 @@ function normalizeRow(headers, values, fallbackCountry, fallbackOrderMeta) {
     countryName: getCountryName(country),
     market: getMarket(country),
     region: getRegion(country, province),
-    model: modelFromSku(source["Lineitem sku"], name),
+    model: modelFromSku(sku, name),
+    powerSpec: normalizePowerSpec(sku || name),
     fullName: name,
-    sku: source["Lineitem sku"],
+    sku,
     province,
     quantity,
     price,
@@ -1560,7 +1563,11 @@ function isRefundedOrder(row) {
 }
 
 function normalizeModelKey(value) {
-  return String(value || "").trim().replace(/^BL\//i, "").replace(/[（(].*?[）)]/g, "").replace(/_[HUK]$/i, "").split("/").map((part) => part.replace(/[_-]?[A-Z]??(美规|欧规|英规|日规|澳规|加拿大规|国规)$/i, "").trim()).filter((part) => part && !/(美规|欧规|英规|日规|澳规|加拿大规|国规)/i.test(part)).join("/");
+  return String(value || "").split(/[+＋]/)[0].trim().replace(/^BL\//i, "").replace(/[（(].*?[）)]/g, "").replace(/_[HUK]$/i, "").split("/").map((part) => part.replace(/[_-]?[A-Z]??(美规|欧规|英规|日规|澳规|加拿大规|国规)$/i, "").trim()).filter((part) => part && !/(美规|欧规|英规|日规|澳规|加拿大规|国规)/i.test(part)).join("/");
+}
+
+function modelMatchKey(value) {
+  return normalizeModelKey(value).toLocaleUpperCase("en-US").replace(/\s+/g, " ").trim();
 }
 
 function getThursdayWeek(date) {
@@ -1789,6 +1796,17 @@ function summarizeModels(items) {
   return groupBy(items, "model").map(([model, group]) => ({ model, countries: [...new Set(group.map((item) => item.countryName))].sort(), units: sum(group, "quantity"), avgPrice: weightedAverage(group), sales: sum(group, "sales") }));
 }
 
+function summarizeModelsByMatchKey(items) {
+  return new Map(groupBy(items, (item) => modelMatchKey(item.model))
+    .map(([key, group]) => [key, {
+      model: group.find((item) => item.model)?.model || key,
+      countries: [...new Set(group.map((item) => item.countryName))].sort(),
+      units: sum(group, "quantity"),
+      avgPrice: weightedAverage(group),
+      sales: sum(group, "sales"),
+    }]));
+}
+
 function inferWarehouse(value) {
   const text = String(value || "");
   if (/_U\b|美国仓|美规|US/i.test(text)) return "美国仓库";
@@ -1852,7 +1870,7 @@ function modelInfoTitle(model) {
 
 function modelStockBreakdown(model) {
   return groupBy(inventoryItems.value
-    .filter((item) => item.model === model)
+    .filter((item) => modelMatchKey(item.model) === modelMatchKey(model))
     .map((item) => ({ ...item, powerSpec: normalizePowerSpec(item.powerSpec || inferPowerSpec(item.warehouse)) })), "powerSpec")
     .sort(([a], [b]) => powerSpecOrder(a) - powerSpecOrder(b))
     .map(([powerSpec, items]) => `${powerSpec} ${number.format(sum(items, "stock"))}`)
@@ -1860,27 +1878,52 @@ function modelStockBreakdown(model) {
 }
 
 function saleGapInfo(model) {
-  const dates = [...new Set(rows.value.filter((row) => row.model === model).map((row) => row.dateKey).filter(Boolean))]
+  const dates = [...new Set(rowsForModel(model).map((row) => row.dateKey).filter(Boolean))]
     .sort((a, b) => b.localeCompare(a));
   if (dates.length < 2) return { saleGapDays: 0, latestSaleDate: dates[0] || "", previousSaleDate: "" };
   const gap = daysBetween(dates[1], dates[0]);
   return { saleGapDays: gap, latestSaleDate: dates[0], previousSaleDate: dates[1] };
 }
 
-function slowMovingInfo(model) {
+function rowsForModel(model, powerSpec = "") {
+  const key = modelMatchKey(model);
+  const spec = powerSpec ? normalizePowerSpec(powerSpec) : "";
+  return rows.value.filter((row) => {
+    if (modelMatchKey(row.model) !== key) return false;
+    if (!spec) return true;
+    return normalizePowerSpec(row.powerSpec || row.sku || row.fullName) === spec;
+  });
+}
+
+function recentSalesInfo(model, powerSpec = "") {
   const reference = latestOrderDate.value || new Date();
   const cutoff = new Date(reference);
   cutoff.setDate(cutoff.getDate() - 90);
-  const modelRows = rows.value.filter((row) => row.model === model && row.createdAt && !Number.isNaN(row.createdAt.getTime()));
+  const modelRows = rowsForModel(model, powerSpec).filter((row) => row.createdAt && !Number.isNaN(row.createdAt.getTime()));
   const recentRows = modelRows.filter((row) => row.createdAt >= cutoff && row.createdAt <= reference);
   const recentUnits = sum(recentRows, "quantity");
   const latestSaleDate = modelRows.map((row) => row.dateKey).filter(Boolean).sort((a, b) => b.localeCompare(a))[0] || "";
+  return { recentUnits, latestSaleDate };
+}
+
+function slowMovingInfo(model, detailRows = []) {
+  const stockedDetails = detailRows.filter((item) => item.stock > 0);
+  const detailSales = stockedDetails.map((item) => ({
+    ...item,
+    ...recentSalesInfo(model, item.powerSpec),
+  }));
+  const slowDetails = detailSales.filter((item) => item.recentUnits === 0 || item.recentUnits < 6);
+  const recentUnits = sum(detailSales, "recentUnits");
+  const latestSaleDate = detailSales.map((item) => item.latestSaleDate).filter(Boolean).sort((a, b) => b.localeCompare(a))[0] || "";
   const noRecentSales = recentUnits === 0;
+  const slowSpecs = slowDetails.map((item) => `${item.powerSpec}${item.recentUnits ? ` ${number.format(item.recentUnits)}台` : ""}`);
+  const isSlowMoving = stockedDetails.length > 0 && (noRecentSales || recentUnits < 6);
   return {
     recentUnits,
     latestSaleDate,
-    isSlowMoving: noRecentSales || recentUnits < 6,
-    slowReason: noRecentSales ? "90天内无销售" : "90天内销量低于6台",
+    slowDetails,
+    isSlowMoving,
+    slowReason: isSlowMoving ? `${slowSpecs.join("、")} ${noRecentSales ? "90天内无销售" : "90天内销量低于6台"}` : "90天销量达标",
   };
 }
 
@@ -1902,7 +1945,7 @@ function modelPriceChange(model) {
 }
 
 function modelPricePoints(model) {
-  return groupBy(rows.value.filter((row) => row.model === model && row.dateKey), "dateKey")
+  return groupBy(rowsForModel(model).filter((row) => row.dateKey), "dateKey")
     .map(([dateKey, group]) => ({
       dateKey,
       units: sum(group, "quantity"),
