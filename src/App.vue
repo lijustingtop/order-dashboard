@@ -547,11 +547,23 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="item in couponRows" :key="item.code">
-                  <td>{{ item.code }}</td>
-                  <td>{{ money.format(item.amount) }}</td>
-                  <td>{{ number.format(item.orders) }}</td>
-                </tr>
+                <template v-for="item in couponRows" :key="item.code">
+                  <tr class="clickable-row" @click="toggleCoupon(item.code)">
+                    <td>{{ item.code }}</td>
+                    <td>{{ money.format(item.amount) }}</td>
+                    <td>{{ number.format(item.orders) }}</td>
+                  </tr>
+                  <tr v-if="expandedCouponKey === item.code">
+                    <td colspan="3">
+                      <div class="ranking-detail">
+                        <div v-for="detail in item.details" :key="detail.key" class="detail-row detail-row-stack">
+                          <span>{{ detail.dateKey }} · {{ detail.order || "未知订单" }} · {{ detail.customerName || "未知客户" }}</span>
+                          <strong>{{ money.format(detail.amount) }}</strong>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                </template>
                 <tr v-if="!couponRows.length"><td colspan="3"><div class="empty">没有优惠码数据</div></td></tr>
               </tbody>
             </table>
@@ -605,6 +617,7 @@ const inventoryWarehouseFilter = ref("all");
 const rankingMode = ref("country");
 const expandedRankingKey = ref("");
 const expandedCustomerKey = ref("");
+const expandedCouponKey = ref("");
 const shareCanvas = ref(null);
 const trendCanvas = ref(null);
 const countryTrendCanvas = ref(null);
@@ -1074,6 +1087,10 @@ function toggleRanking(key) {
 
 function toggleCustomer(key) {
   expandedCustomerKey.value = expandedCustomerKey.value === key ? "" : key;
+}
+
+function toggleCoupon(key) {
+  expandedCouponKey.value = expandedCouponKey.value === key ? "" : key;
 }
 
 function toggleInventoryGroup(key) {
@@ -1753,6 +1770,11 @@ function summarizeRefundOrders(items, refundItems = []) {
     previous.refundedAmount = Math.max(previous.refundedAmount || 0, item.refundedAmount || 0);
     previous.reason = previous.reason || item.reason || matchedOrder?.refundReason || "";
     previous.dateKey = item.dateKey || previous.dateKey || matchedOrder?.dateKey || "";
+    previous.createdAt = item.createdAt || previous.createdAt || matchedOrder?.createdAt;
+    previous.year = item.year || previous.year || matchedOrder?.year || "";
+    previous.quarter = item.quarter || previous.quarter || matchedOrder?.quarter || "";
+    previous.month = item.month || previous.month || matchedOrder?.month || "";
+    previous.week = item.week || previous.week || matchedOrder?.week || "";
     previous.customerName = previous.customerName || matchedOrder?.customerName || item.customerName || "未知客户";
     previous.countryName = previous.countryName || matchedOrder?.countryName || "";
     map.set(key, previous);
@@ -1764,19 +1786,38 @@ function summarizeCoupons(items) {
   const orderMap = new Map();
   items.filter((item) => item.discountCode || item.discountAmount || item.lineDiscount).forEach((item) => {
     const orderKey = item.order || `${item.email}:${item.dateKey}`;
-    const previous = orderMap.get(orderKey) || { code: item.discountCode || "未填写优惠码", amount: 0 };
+    const previous = orderMap.get(orderKey) || {
+      key: orderKey,
+      order: item.order,
+      dateKey: item.dateKey,
+      customerName: item.customerName,
+      code: item.discountCode || "未填写优惠码",
+      amount: 0,
+    };
     previous.code = previous.code || item.discountCode || "未填写优惠码";
     previous.amount = Math.max(previous.amount, item.discountAmount || 0) + (item.lineDiscount || 0);
+    previous.dateKey = previous.dateKey || item.dateKey;
+    previous.customerName = previous.customerName || item.customerName;
     orderMap.set(orderKey, previous);
   });
   const couponMap = new Map();
   orderMap.forEach((order) => {
-    const previous = couponMap.get(order.code) || { code: order.code, amount: 0, orders: 0 };
+    const previous = couponMap.get(order.code) || { code: order.code, amount: 0, orders: 0, details: [] };
     previous.amount += order.amount;
     previous.orders += 1;
+    previous.details.push({
+      key: order.key,
+      order: order.order,
+      dateKey: order.dateKey,
+      customerName: order.customerName,
+      amount: order.amount,
+    });
     couponMap.set(order.code, previous);
   });
-  return [...couponMap.values()].filter((item) => item.amount > 0).sort((a, b) => b.amount - a.amount);
+  return [...couponMap.values()]
+    .filter((item) => item.amount > 0)
+    .map((item) => ({ ...item, details: item.details.sort((a, b) => b.dateKey.localeCompare(a.dateKey)) }))
+    .sort((a, b) => b.amount - a.amount);
 }
 
 function indexByName(items) {

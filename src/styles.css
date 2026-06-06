@@ -1129,6 +1129,14 @@ td {
   font-size: 14px;
 }
 
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover {
+  background: #f6faf8;
+}
+
 th {
   position: sticky;
   top: 0;
