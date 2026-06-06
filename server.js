@@ -104,12 +104,10 @@ async function saveUploadedSheet(file, targetDir, type) {
 
 function decodeCsvBuffer(buffer) {
   if (buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf) return buffer.subarray(3).toString("utf8");
-  const utf8 = buffer.toString("utf8");
-  if (!utf8.includes("\uFFFD")) return utf8;
   try {
-    return new TextDecoder("gb18030").decode(buffer);
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
   } catch {
-    return utf8;
+    return new TextDecoder("gb18030").decode(buffer);
   }
 }
 

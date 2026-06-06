@@ -1384,12 +1384,10 @@ async function readSheetFile(file) {
 function decodeTextBuffer(buffer) {
   const bytes = new Uint8Array(buffer);
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return new TextDecoder("utf-8").decode(bytes.subarray(3));
-  const utf8 = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-  if (!utf8.includes("\uFFFD")) return utf8;
   try {
-    return new TextDecoder("gb18030").decode(bytes);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    return utf8;
+    return new TextDecoder("gb18030").decode(bytes);
   }
 }
 
