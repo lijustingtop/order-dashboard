@@ -295,7 +295,7 @@ export default function DashboardClient() {
 
 function KpiStrip({ data }: { data: AnalyticsResponse | null }) {
   const items = [
-    { title: "GMV", value: formatMoney(data?.kpis.salesAmount ?? 0), meta: "销售额", mom: data?.comparison.mom.salesAmount, yoy: data?.comparison.yoy.salesAmount },
+    { title: "销售额", value: formatMoney(data?.kpis.netSalesAmount ?? 0), meta: "已扣退款 / Accessories", mom: data?.comparison.mom.netSalesAmount, yoy: data?.comparison.yoy.netSalesAmount },
     { title: "销量", value: formatNumber(data?.kpis.quantity ?? 0), meta: "Units sold", mom: data?.comparison.mom.quantity, yoy: data?.comparison.yoy.quantity },
     { title: "订单数", value: formatNumber(data?.kpis.orderCount ?? 0), meta: "Orders", mom: data?.comparison.mom.orderCount, yoy: data?.comparison.yoy.orderCount },
     { title: "客单价", value: formatMoney(data?.kpis.aov ?? 0), meta: "AOV", mom: data?.comparison.mom.aov, yoy: data?.comparison.yoy.aov },
