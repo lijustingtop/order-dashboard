@@ -1,0 +1,420 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { dateDimension, inRange, previousRange, previousYearRange, resolveDateRange } from "@/lib/date";
+import { loadFactOrders } from "@/lib/fact-orders";
+import { niceScale } from "@/lib/nice-scale";
+import type {
+  AnalyticsFilters,
+  AnalyticsResponse,
+  CachedAnalysis,
+  ComparisonSummary,
+  CountryRankingRow,
+  CountryAnalysisRow,
+  CustomerRankingRow,
+  DrilldownRankingRow,
+  FactOrder,
+  Kpis,
+  OrderDetailRow,
+  RankingRow,
+  RefundDetailRow,
+  SkuAnalysisRow,
+  TrendMetric,
+  TrendPoint,
+} from "@/types/analytics";
+
+const aggregationCache = new Map<string, { expiresAt: number; value: AnalyticsResponse }>();
+
+export async function getAnalytics(filters: AnalyticsFilters): Promise<AnalyticsResponse> {
+  const normalized = normalizeFilters(filters);
+  const cacheKey = JSON.stringify(normalized);
+  const cached = aggregationCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return { ...cached.value, cached: true };
+
+  const facts = await loadFactOrders();
+  const latestDate = facts.reduce((latest, row) => row.date > latest ? row.date : latest, "");
+  const range = resolveDateRange(normalized.preset, normalized.start, normalized.end, latestDate);
+  const previous = previousRange(range);
+  const previousYear = previousYearRange(range);
+  const filtered = filterFacts(facts, normalized, range);
+  const previousPeriodFacts = filterFacts(facts, normalized, previous);
+  const previousYearFacts = filterFacts(facts, normalized, previousYear);
+  const response = await buildAnalyticsResponse(filtered, previousPeriodFacts, previousYearFacts, normalized, range, false);
+  aggregationCache.set(cacheKey, { expiresAt: Date.now() + 60_000, value: response });
+  return response;
+}
+
+export async function getExportRows(filters: AnalyticsFilters, table: "sku" | "country") {
+  const analytics = await getAnalytics(filters);
+  return table === "country" ? analytics.countryRows : analytics.skuRows;
+}
+
+function normalizeFilters(filters: AnalyticsFilters): AnalyticsFilters {
+  return {
+    preset: filters.preset || "week",
+    start: filters.start,
+    end: filters.end,
+    countries: [...new Set(filters.countries || [])].sort(),
+    skus: [...new Set(filters.skus || [])].sort(),
+    search: filters.search?.trim() || "",
+    rankOffset: Math.max(0, Number(filters.rankOffset || 0)),
+    rankLimit: Math.min(100, Math.max(10, Number(filters.rankLimit || 10))),
+  };
+}
+
+function filterFacts(facts: FactOrder[], filters: AnalyticsFilters, range: { start: string; end: string }): FactOrder[] {
+  const countrySet = new Set(filters.countries);
+  const skuSet = new Set(filters.skus);
+  const search = filters.search?.toLowerCase() || "";
+  return facts.filter((row) => {
+    if (!inRange(row.date, range.start, range.end)) return false;
+    if (countrySet.size && !countrySet.has(row.country)) return false;
+    if (skuSet.size && !skuSet.has(row.model || row.sku)) return false;
+    if (search && !`${row.model || ""} ${row.sku} ${row.productTitle} ${row.country}`.toLowerCase().includes(search)) return false;
+    return true;
+  });
+}
+
+async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: FactOrder[], previousYearFacts: FactOrder[], filters: AnalyticsFilters, range: { start: string; end: string }, cached: boolean): Promise<AnalyticsResponse> {
+  const kpis = summarizeKpis(facts);
+  const trend = summarizeTrend(facts);
+  const previousPeriodTrend = summarizeTrend(previousPeriodFacts);
+  const previousYearTrend = summarizeTrend(previousYearFacts);
+  const skuRows = summarizeSku(facts);
+  const countryRows = summarizeCountry(facts);
+  const recentOrders = summarizeRecentOrders(facts);
+  const customerRows = summarizeCustomers(facts);
+  const refundRows = summarizeRefunds(facts);
+  const comparison = summarizeComparison(kpis, summarizeKpis(previousPeriodFacts), summarizeKpis(previousYearFacts));
+  const analysis = await loadOrCreateAnalysis(range, filters, kpis, comparison, trend, skuRows, countryRows);
+  const rankOffset = filters.rankOffset || 0;
+  const rankLimit = filters.rankLimit || 10;
+  const rankings = {
+    quantity: toRankingRows(skuRows, "quantity", kpis.quantity).slice(rankOffset, rankOffset + rankLimit),
+    sales: toRankingRows(skuRows, "salesAmount", kpis.salesAmount).slice(rankOffset, rankOffset + rankLimit),
+    refunds: toRankingRows(skuRows, "refundAmount", kpis.refundAmount).slice(rankOffset, rankOffset + rankLimit),
+    countryQuantity: toCountryRankingRows(countryRows, "quantity", kpis.quantity).slice(rankOffset, rankOffset + rankLimit),
+    countrySales: toCountryRankingRows(countryRows, "salesAmount", kpis.salesAmount).slice(rankOffset, rankOffset + rankLimit),
+  };
+  return {
+    generatedAt: new Date().toISOString(),
+    cached,
+    filters,
+    kpis,
+    comparison,
+    trend,
+    previousPeriodTrend,
+    previousYearTrend,
+    scales: buildScales(trend),
+    rankings,
+    skuRows,
+    countryRows,
+    recentOrders,
+    customerRows,
+    refundRows,
+    analysis,
+    drilldowns: buildDrilldowns(facts),
+    dimensions: {
+      countries: [...groupBy(facts, (row) => row.country).entries()].map(([country, group]) => ({ country, orderCount: distinctCount(group, "orderId") })).sort((a, b) => a.country.localeCompare(b.country)),
+      products: [...groupBy(facts, (row) => row.model || row.sku).entries()].map(([sku, group]) => ({ sku, productTitle: sku || group[0]?.productTitle || sku })).sort((a, b) => a.sku.localeCompare(b.sku)),
+      dates: [...new Set(facts.map((row) => row.date))].sort().map(dateDimension),
+    },
+  };
+}
+
+function summarizeKpis(facts: FactOrder[]): Kpis {
+  const salesFacts = facts.filter((row) => row.eventType === "sale");
+  const refundFacts = facts.filter((row) => row.eventType === "refund" && row.refundAmount > 0);
+  const quantity = sum(salesFacts, "quantity");
+  const salesAmount = sum(salesFacts, "salesAmount");
+  const refundAmount = sum(refundFacts, "refundAmount");
+  const orderCount = distinctCount(salesFacts, "orderId");
+  const refundOrders = new Set(refundFacts.map((row) => row.orderId)).size;
+  return {
+    quantity,
+    salesAmount,
+    refundAmount,
+    netSalesAmount: salesAmount - refundAmount,
+    orderCount,
+    refundRate: ratio(refundAmount, salesAmount),
+    refundOrderRate: ratio(refundOrders, orderCount),
+    aov: ratio(salesAmount, orderCount),
+    unitPrice: ratio(salesAmount, quantity),
+    avgItemsPerOrder: ratio(quantity, orderCount),
+  };
+}
+
+function summarizeTrend(facts: FactOrder[]): TrendPoint[] {
+  return [...groupBy(facts, (row) => row.date).entries()].map(([date, group]) => {
+    const kpis = summarizeKpis(group);
+    return { date, ...kpis };
+  }).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function summarizeSku(facts: FactOrder[]): SkuAnalysisRow[] {
+  return [...groupBy(facts, (row) => row.model || row.sku).entries()].map(([sku, group]) => {
+    const kpis = summarizeKpis(group);
+    return {
+      sku,
+      productTitle: sku,
+      quantity: kpis.quantity,
+      salesAmount: kpis.salesAmount,
+      refundAmount: kpis.refundAmount,
+      netSalesAmount: kpis.netSalesAmount,
+      avgUnitPrice: kpis.unitPrice,
+      orderCount: kpis.orderCount,
+      avgItemsPerOrder: kpis.avgItemsPerOrder,
+      refundRate: kpis.refundRate,
+    };
+  }).sort((a, b) => b.netSalesAmount - a.netSalesAmount);
+}
+
+function summarizeRecentOrders(facts: FactOrder[]): OrderDetailRow[] {
+  return facts
+    .filter((row) => row.eventType === "sale")
+    .map((row) => ({
+      orderId: row.orderId,
+      date: row.orderDate,
+      country: row.country,
+      sku: row.model || row.sku,
+      productTitle: row.productTitle,
+      quantity: row.quantity,
+      salesAmount: row.salesAmount,
+      refundAmount: row.refundAmount,
+      netSalesAmount: row.salesAmount - row.refundAmount,
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 80);
+}
+
+function summarizeCustomers(facts: FactOrder[]): CustomerRankingRow[] {
+  const salesFacts = facts.filter((row) => row.eventType === "sale");
+  return [...groupBy(salesFacts, (row) => row.customerEmail || row.customerName || row.orderId).entries()].map(([, group]) => ({
+    customerName: group[0]?.customerName || "未知客户",
+    customerEmail: group[0]?.customerEmail || "未提供",
+    country: group[0]?.country || "未知",
+    orderIds: [...new Set(group.map((row) => row.orderId))],
+    models: [...new Set(group.map((row) => row.model || row.sku))],
+    orderCount: distinctCount(group, "orderId"),
+    quantity: sum(group, "quantity"),
+    salesAmount: sum(group, "salesAmount"),
+  })).sort((a, b) => b.salesAmount - a.salesAmount).slice(0, 10);
+}
+
+function summarizeRefunds(facts: FactOrder[]): RefundDetailRow[] {
+  return facts
+    .filter((row) => row.eventType === "refund" && row.refundAmount > 0)
+    .map((row) => ({
+      refundId: row.refundId || `${row.orderId}-${row.refundDate || row.date}`,
+      orderId: row.orderId,
+      orderDate: row.orderDate,
+      refundDate: row.refundDate || row.date,
+      country: row.country,
+      sku: row.model || row.sku,
+      productTitle: row.productTitle,
+      refundReason: row.refundReason || "未填写",
+      salesAmount: row.salesAmount,
+      refundAmount: row.refundAmount,
+      customerEmail: row.customerEmail || "未提供",
+    }))
+    .sort((a, b) => b.refundDate.localeCompare(a.refundDate))
+    .slice(0, 120);
+}
+
+function summarizeCountry(facts: FactOrder[]): CountryAnalysisRow[] {
+  return [...groupBy(facts, (row) => row.country).entries()].map(([country, group]) => {
+    const kpis = summarizeKpis(group);
+    return {
+      country,
+      quantity: kpis.quantity,
+      salesAmount: kpis.salesAmount,
+      refundAmount: kpis.refundAmount,
+      netSalesAmount: kpis.netSalesAmount,
+      orderCount: kpis.orderCount,
+      refundRate: kpis.refundRate,
+    };
+  }).sort((a, b) => b.netSalesAmount - a.netSalesAmount);
+}
+
+function toRankingRows(rows: SkuAnalysisRow[], key: "quantity" | "salesAmount" | "refundAmount", total: number): RankingRow[] {
+  return rows.map((row) => ({
+    sku: row.sku,
+    productTitle: row.productTitle,
+    quantity: row.quantity,
+    salesAmount: row.salesAmount,
+    refundAmount: row.refundAmount,
+    share: ratio(Number(row[key]), total),
+    refundRate: row.refundRate,
+  })).sort((a, b) => Number(b[key]) - Number(a[key]));
+}
+
+function toCountryRankingRows(rows: CountryAnalysisRow[], key: "quantity" | "salesAmount", total: number): CountryRankingRow[] {
+  return rows.map((row) => ({
+    country: row.country,
+    quantity: row.quantity,
+    salesAmount: row.salesAmount,
+    refundAmount: row.refundAmount,
+    netSalesAmount: row.netSalesAmount,
+    orderCount: row.orderCount,
+    share: ratio(Number(row[key]), total),
+    refundRate: row.refundRate,
+  })).sort((a, b) => Number(b[key]) - Number(a[key]));
+}
+
+function buildDrilldowns(facts: FactOrder[]): AnalyticsResponse["drilldowns"] {
+  const countryModels: Record<string, DrilldownRankingRow[]> = {};
+  for (const [country, group] of groupBy(facts, (row) => row.country).entries()) {
+    const totalSales = sum(group, "salesAmount");
+    countryModels[country] = toDrilldownRows(group, (row) => row.model || row.sku, totalSales, "salesAmount");
+  }
+
+  const modelCountries: Record<string, DrilldownRankingRow[]> = {};
+  for (const [model, group] of groupBy(facts, (row) => row.model || row.sku).entries()) {
+    const totalSales = sum(group, "salesAmount");
+    modelCountries[model] = toDrilldownRows(group, (row) => row.country, totalSales, "salesAmount");
+  }
+
+  return { countryModels, modelCountries };
+}
+
+function toDrilldownRows(facts: FactOrder[], key: (row: FactOrder) => string, total: number, sortKey: "quantity" | "salesAmount"): DrilldownRankingRow[] {
+  const salesFacts = facts.filter((row) => row.eventType === "sale");
+  return [...groupBy(salesFacts, key).entries()].map(([value, group]) => {
+    const quantity = sum(group, "quantity");
+    const salesAmount = sum(group, "salesAmount");
+    const orderCount = distinctCount(group, "orderId");
+    return {
+      key: value,
+      label: value,
+      quantity,
+      salesAmount,
+      orderCount,
+      share: ratio(salesAmount, total),
+    };
+  }).sort((a, b) => Number(b[sortKey]) - Number(a[sortKey]));
+}
+
+function summarizeComparison(current: Kpis, previousPeriod: Kpis, previousYear: Kpis): ComparisonSummary {
+  return {
+    current,
+    previousPeriod,
+    previousYear,
+    mom: growthMap(current, previousPeriod),
+    yoy: growthMap(current, previousYear),
+  };
+}
+
+function growthMap(current: Kpis, previous: Kpis): Partial<Record<keyof Kpis, number>> {
+  const keys: Array<keyof Kpis> = ["quantity", "salesAmount", "refundAmount", "netSalesAmount", "orderCount", "aov", "unitPrice", "avgItemsPerOrder", "refundRate", "refundOrderRate"];
+  return Object.fromEntries(keys.map((key) => [key, ratio(current[key] - previous[key], previous[key])])) as Partial<Record<keyof Kpis, number>>;
+}
+
+async function loadOrCreateAnalysis(range: { start: string; end: string }, filters: AnalyticsFilters, kpis: Kpis, comparison: ComparisonSummary, trend: TrendPoint[], skuRows: SkuAnalysisRow[], countryRows: CountryAnalysisRow[]): Promise<CachedAnalysis> {
+  const key = [
+    range.start,
+    range.end,
+    filters.countries.join("_") || "all-countries",
+    filters.skus.join("_") || "all-models",
+  ].join("__").replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const dir = path.join(process.cwd(), "outputs", "analytics-analysis");
+  const filePath = path.join(dir, `${key}.md`);
+  const signature = analysisSignature(kpis, trend);
+  try {
+    const content = await readFile(filePath, "utf8");
+    if (content.includes(`数据签名：${signature}`)) return { path: filePath, content, cached: true };
+  } catch {
+  }
+  await mkdir(dir, { recursive: true });
+  const content = buildAnalysisMarkdown(range, filters, kpis, comparison, trend, skuRows, countryRows, signature);
+  await writeFile(filePath, content, "utf8");
+  return { path: filePath, content, cached: false };
+}
+
+function buildAnalysisMarkdown(range: { start: string; end: string }, filters: AnalyticsFilters, kpis: Kpis, comparison: ComparisonSummary, trend: TrendPoint[], skuRows: SkuAnalysisRow[], countryRows: CountryAnalysisRow[], signature: string): string {
+  const bestSku = skuRows[0];
+  const bestCountry = countryRows[0];
+  const trendDirection = (comparison.mom.salesAmount || 0) >= 0 ? "上升" : "下降";
+  const quantityDirection = (comparison.mom.quantity || 0) >= 0 ? "上升" : "下降";
+  const refundPressure = kpis.refundRate > 0.08 ? "退款率偏高，对净销售额形成明显压力。" : "退款率处于可控区间，对净销售额影响有限。";
+  const dailySales = trend.map((row) => row.salesAmount);
+  const volatility = dailySales.length > 1 ? Math.max(...dailySales) - Math.min(...dailySales) : 0;
+  return [
+    `# Shopify 销售分析 ${range.start} 至 ${range.end}`,
+    "",
+    `筛选国家：${filters.countries.join(", ") || "全部"}`,
+    `筛选型号：${filters.skus.join(", ") || "全部"}`,
+    `数据签名：${signature}`,
+    "",
+    "## 核心结论",
+    `- GMV：${moneyText(kpis.salesAmount)}，环比${percentText(comparison.mom.salesAmount)}，同比${percentText(comparison.yoy.salesAmount)}。`,
+    `- 销量：${numberText(kpis.quantity)}，环比${percentText(comparison.mom.quantity)}，同比${percentText(comparison.yoy.quantity)}。`,
+    `- 净销售额：${moneyText(kpis.netSalesAmount)}，退款额：${moneyText(kpis.refundAmount)}，退款率：${percentText(kpis.refundRate)}。`,
+    "",
+    "## 可能原因",
+    `- 销售额环比${trendDirection}，主要由销量环比${quantityDirection}驱动；若客单价同时变化，则说明产品组合或高低价型号占比发生变化。`,
+    bestSku ? `- 型号贡献最高的是 ${bestSku.sku}，销售额 ${moneyText(bestSku.salesAmount)}，销量 ${numberText(bestSku.quantity)}。` : "- 当前时间段没有可用型号销售数据。",
+    bestCountry ? `- 国家贡献最高的是 ${bestCountry.country}，销售额 ${moneyText(bestCountry.salesAmount)}，订单数 ${numberText(bestCountry.orderCount)}。` : "- 当前时间段没有可用国家销售数据。",
+    `- ${refundPressure}`,
+    volatility > 0 ? `- 时间段内日销售波动约 ${moneyText(volatility)}，建议结合投放、促销、库存和物流节点排查峰谷原因。` : "- 当前时间段销售波动较小或数据点不足。",
+    "",
+    "## 后续调研建议",
+    "- 对环比下降的型号拆分国家，查看是否集中在单一市场。",
+    "- 对退款率高的型号查看退款理由、退款时间和对应订单国家。",
+    "- 若同比增长但环比下降，优先判断是否为季节性回落；若同比和环比同时下降，优先检查流量、价格、库存和物流时效。",
+    "",
+  ].join("\n");
+}
+
+function analysisSignature(kpis: Kpis, trend: TrendPoint[]): string {
+  return [
+    Math.round(kpis.salesAmount * 100),
+    Math.round(kpis.refundAmount * 100),
+    kpis.quantity,
+    kpis.orderCount,
+    trend.length,
+    trend.at(-1)?.date || "none",
+  ].join("-");
+}
+
+function buildScales(trend: TrendPoint[]): Record<TrendMetric, ReturnType<typeof niceScale>> {
+  return {
+    quantity: niceScale(Math.max(...trend.map((row) => row.quantity), 0)),
+    money: niceScale(Math.max(...trend.flatMap((row) => [row.salesAmount, row.refundAmount]), 0)),
+    unitPrice: niceScale(Math.max(...trend.map((row) => row.unitPrice), 0)),
+    avgItemsPerOrder: niceScale(Math.max(...trend.map((row) => row.avgItemsPerOrder), 0)),
+  };
+}
+
+function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const value = key(item) || "Unknown";
+    const group = map.get(value) || [];
+    group.push(item);
+    map.set(value, group);
+  }
+  return map;
+}
+
+function sum<T extends Record<string, unknown>>(items: T[], key: keyof T): number {
+  return items.reduce((total, item) => total + Number(item[key] || 0), 0);
+}
+
+function distinctCount<T extends Record<string, unknown>>(items: T[], key: keyof T): number {
+  return new Set(items.map((item) => String(item[key] || ""))).size;
+}
+
+function ratio(a: number, b: number): number {
+  return b ? a / b : 0;
+}
+
+function moneyText(value: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value || 0);
+}
+
+function numberText(value: number): string {
+  return new Intl.NumberFormat("zh-CN").format(value || 0);
+}
+
+function percentText(value: number | undefined): string {
+  return new Intl.NumberFormat("zh-CN", { style: "percent", maximumFractionDigits: 2 }).format(value || 0);
+}

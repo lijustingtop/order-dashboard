@@ -1,11 +1,14 @@
 node_modules/
 dist/
+.next/
 .npm-cache/
 /public/data/
 /public/data-manifest.json
 .DS_Store
 *.log
 .env
+.env.local
+.env*.local
 /orders_export_*.csv
 /tableConvert.com_tib0sx.csv
 /库存型号清单.xlsx

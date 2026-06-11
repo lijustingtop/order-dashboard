@@ -1,38 +1,65 @@
-# 订单数据预览
+# Shopify Analytics Dashboard
 
-Vue 版订单数据看板，支持读取项目指定目录中的 CSV，也支持从网页上传新的订单 CSV。
+Next.js + React + TypeScript + Tailwind + ECharts + TanStack Table 的 Shopify Analytics Dashboard。
 
 ## 启动
 
 ```bash
 npm install --cache ./.npm-cache
-npm start
+npm run dev
 ```
 
-打开浏览器访问：
+打开：
 
 ```text
 http://localhost:5173
 ```
 
-## 数据目录
+## 数据流
 
-- 订单 CSV 默认目录：`data/orders`
-- 库存 CSV 默认目录：`data/inventory`
+- 生产同步：Shopify Admin GraphQL API，默认版本 `2026-07`。
+- 大批量订单：使用 GraphQL Bulk Operations，不实时拉取订单。
+- 数据来源：只读取 Shopify Admin GraphQL API 的 Bulk Operation 结果，并在服务端转换成 `FactOrders`。
+- SKU 归并：服务端聚合前会去除美规、欧规、英规、澳规、日规等电源规格，避免同一型号被拆成多条。
+- 服务端聚合：`/api/analytics` 返回 KPI、趋势、排行榜、SKU 分析、国家分析。
+- 缓存：服务端内存缓存 60 秒，响应带 `s-maxage=60, stale-while-revalidate=300`。
 
-网页上传的订单 CSV 会保存到 `data/orders`，刷新后仍可从“项目文件夹”区域选择读取。
-
-也可以通过环境变量指定其他文件夹：
+## Shopify 环境变量
 
 ```bash
-ORDER_DATA_DIR=/path/to/orders INVENTORY_DATA_DIR=/path/to/inventory npm start
+SHOPIFY_SHOP_DOMAIN=your-store.myshopify.com
+SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_xxx
+SHOPIFY_API_VERSION=2026-07
 ```
 
-## GitHub 上传
+同步接口：
 
-本项目已经初始化为 Git 仓库。完成 GitHub 登录后，可以添加远程仓库并推送：
+```text
+POST /api/shopify/sync
+GET  /api/shopify/status
+```
 
-```bash
-git remote add origin https://github.com/<你的用户名>/<仓库名>.git
-git push -u origin main
+## 导出
+
+```text
+/api/export?table=sku&format=xlsx
+/api/export?table=sku&format=csv
+/api/export?table=country&format=xlsx
+/api/export?table=country&format=csv
+```
+
+## 数据模型
+
+事实表：
+
+```text
+FactOrders(OrderId, Date, Country, SKU, ProductTitle, Quantity, SalesAmount, RefundAmount, Currency)
+```
+
+维度表：
+
+```text
+DimCountry
+DimProduct
+DimDate
 ```
