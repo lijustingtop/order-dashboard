@@ -95,7 +95,7 @@ export default function DashboardClient() {
   const countryQuantityRows = buildRankRows(data, "country", "quantity");
   const modelSalesRows = buildRankRows(data, "model", "sales");
   const modelQuantityRows = buildRankRows(data, "model", "quantity");
-  const weekOptions = data?.dimensions.dates.map((item) => item.week).filter((item, index, list) => list.indexOf(item) === index) ?? [];
+  const weekOptions = data?.dimensions.weeks ?? [];
   const viewTitle = selectedCountry && activeView === "countries" ? `${selectedCountry} Overview` : selectedModel && activeView === "products" ? `${selectedModel} Overview` : activeView === "orders" ? "订单明细" : activeView === "refunds" ? "退款分析" : "Overview";
 
   return (
@@ -139,15 +139,15 @@ export default function DashboardClient() {
           <select className="apple-field" value={preset} onChange={(event) => setPreset(event.target.value as DatePreset)}>
             {dateOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-          <select className="apple-field" value={preset === "custom" && start && end ? `${start} 至 ${end}` : ""} onChange={(event) => {
-            const [weekStart, weekEnd] = event.target.value.split(" 至 ");
-            if (!weekStart || !weekEnd) return;
+          <select className="apple-field" value={preset === "custom" && start && end ? `${start}__${end}` : ""} onChange={(event) => {
+            const option = weekOptions.find((item) => item.key === event.target.value);
+            if (!option) return;
             setPreset("custom");
-            setStart(weekStart);
-            setEnd(weekEnd);
+            setStart(option.start);
+            setEnd(option.end);
           }}>
             <option value="">周区间快捷选择</option>
-            {weekOptions.map((week, index) => <option key={week} value={week}>第 {index + 1} 周：{week}</option>)}
+            {weekOptions.map((week, index) => <option key={week.key} value={week.key}>第 {weekOptions.length - index} 周：{week.label}</option>)}
           </select>
           {preset === "custom" ? (
             <>
@@ -280,13 +280,14 @@ export default function DashboardClient() {
                   />
                 </section>
                 <CustomerRanking rows={data?.customerRows ?? []} />
+                <AnalysisPanel analysis={data?.analysis} />
               </>
             ) : null}
           </>
         ) : activeView === "refunds" ? (
           <RefundAnalysis rows={data?.refundRows ?? []} />
         ) : (
-          <RecentOrders rows={data?.recentOrders ?? []} />
+          <RecentOrders rows={data?.recentOrders ?? []} dateRange={data?.dateRange} />
         )}
       </section>
     </main>
@@ -521,11 +522,14 @@ function resolveRankTarget(view: ViewKey, selectedCountry: string, selectedModel
   return manualTarget;
 }
 
-function RecentOrders({ rows, compact }: { rows: AnalyticsResponse["recentOrders"]; compact?: boolean }) {
+function RecentOrders({ rows, compact, dateRange }: { rows: AnalyticsResponse["recentOrders"]; compact?: boolean; dateRange?: AnalyticsResponse["dateRange"] }) {
   return (
     <section className="glass-card orders-card">
       <div className="card-title-row">
-        <h2>订单明细</h2>
+        <div>
+          <h2>订单明细</h2>
+          <p>{dateRange?.label || "当前筛选时间段"} · 当前返回 {rows.length} 条</p>
+        </div>
         <span>{rows.length} lines</span>
       </div>
       <div className={compact ? "orders-table compact" : "orders-table"}>
@@ -541,7 +545,7 @@ function RecentOrders({ rows, compact }: { rows: AnalyticsResponse["recentOrders
             </tr>
           </thead>
           <tbody>
-            {rows.slice(0, compact ? 6 : 40).map((row) => (
+            {rows.slice(0, compact ? 6 : rows.length).map((row) => (
               <tr key={`${row.orderId}-${row.sku}-${row.date}`}>
                 <td>{row.orderId}</td>
                 <td>{row.country}</td>
@@ -553,6 +557,24 @@ function RecentOrders({ rows, compact }: { rows: AnalyticsResponse["recentOrders
             ))}
           </tbody>
         </table>
+      </div>
+    </section>
+  );
+}
+
+function AnalysisPanel({ analysis }: { analysis?: AnalyticsResponse["analysis"] }) {
+  const lines = (analysis?.content || "").split("\n").filter((line) => line.startsWith("- "));
+  return (
+    <section className="glass-card analysis-card">
+      <div className="card-title-row">
+        <div>
+          <h2>AI 销量分析</h2>
+          <p>{analysis?.cached ? "已读取本地分析文件" : "已生成新的本地分析文件"}</p>
+        </div>
+        <span>{analysis?.path ? analysis.path.split("/").pop() : ""}</span>
+      </div>
+      <div className="analysis-summary">
+        {lines.slice(0, 8).map((line) => <p key={line}>{line.replace(/^- /, "")}</p>)}
       </div>
     </section>
   );

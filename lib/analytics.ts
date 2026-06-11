@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { dateDimension, inRange, previousRange, previousYearRange, resolveDateRange } from "@/lib/date";
+import { dateDimension, formatChineseDate, inRange, parseDate, previousRange, previousYearRange, resolveDateRange, weekOption } from "@/lib/date";
 import { loadFactOrders } from "@/lib/fact-orders";
 import { niceScale } from "@/lib/nice-scale";
 import type {
@@ -38,7 +38,7 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
   const filtered = filterFacts(facts, normalized, range);
   const previousPeriodFacts = filterFacts(facts, normalized, previous);
   const previousYearFacts = filterFacts(facts, normalized, previousYear);
-  const response = await buildAnalyticsResponse(filtered, previousPeriodFacts, previousYearFacts, normalized, range, false);
+  const response = await buildAnalyticsResponse(filtered, previousPeriodFacts, previousYearFacts, facts, normalized, range, false);
   aggregationCache.set(cacheKey, { expiresAt: Date.now() + 60_000, value: response });
   return response;
 }
@@ -74,7 +74,7 @@ function filterFacts(facts: FactOrder[], filters: AnalyticsFilters, range: { sta
   });
 }
 
-async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: FactOrder[], previousYearFacts: FactOrder[], filters: AnalyticsFilters, range: { start: string; end: string }, cached: boolean): Promise<AnalyticsResponse> {
+async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: FactOrder[], previousYearFacts: FactOrder[], allFacts: FactOrder[], filters: AnalyticsFilters, range: { start: string; end: string }, cached: boolean): Promise<AnalyticsResponse> {
   const kpis = summarizeKpis(facts);
   const trend = summarizeTrend(facts);
   const previousPeriodTrend = summarizeTrend(previousPeriodFacts);
@@ -99,6 +99,11 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
     generatedAt: new Date().toISOString(),
     cached,
     filters,
+    dateRange: {
+      start: range.start,
+      end: range.end,
+      label: `${formatChineseDate(range.start)}到${formatChineseDate(range.end)}`,
+    },
     kpis,
     comparison,
     trend,
@@ -114,9 +119,10 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
     analysis,
     drilldowns: buildDrilldowns(facts),
     dimensions: {
-      countries: [...groupBy(facts, (row) => row.country).entries()].map(([country, group]) => ({ country, orderCount: distinctCount(group, "orderId") })).sort((a, b) => a.country.localeCompare(b.country)),
-      products: [...groupBy(facts, (row) => row.model || row.sku).entries()].map(([sku, group]) => ({ sku, productTitle: sku || group[0]?.productTitle || sku })).sort((a, b) => a.sku.localeCompare(b.sku)),
-      dates: [...new Set(facts.map((row) => row.date))].sort().map(dateDimension),
+      countries: [...groupBy(allFacts, (row) => row.country).entries()].map(([country, group]) => ({ country, orderCount: distinctCount(group, "orderId") })).sort((a, b) => a.country.localeCompare(b.country)),
+      products: [...groupBy(allFacts, (row) => row.model || row.sku).entries()].map(([sku, group]) => ({ sku, productTitle: sku || group[0]?.productTitle || sku })).sort((a, b) => a.sku.localeCompare(b.sku)),
+      dates: [...new Set(allFacts.map((row) => row.date))].sort().map(dateDimension),
+      weeks: buildWeekOptions(allFacts),
     },
   };
 }
@@ -183,7 +189,7 @@ function summarizeRecentOrders(facts: FactOrder[]): OrderDetailRow[] {
       netSalesAmount: row.salesAmount - row.refundAmount,
     }))
     .sort((a, b) => b.date.localeCompare(a.date))
-    .slice(0, 80);
+    .slice(0, 500);
 }
 
 function summarizeCustomers(facts: FactOrder[]): CustomerRankingRow[] {
@@ -405,6 +411,26 @@ function distinctCount<T extends Record<string, unknown>>(items: T[], key: keyof
 
 function ratio(a: number, b: number): number {
   return b ? a / b : 0;
+}
+
+function buildWeekOptions(facts: FactOrder[]) {
+  const minDate = facts.reduce((min, row) => row.date && row.date < min ? row.date : min, "2025-01-01");
+  const maxDate = facts.reduce((max, row) => row.date > max ? row.date : max, "");
+  const start = parseDate(minDate < "2025-01-01" ? "2025-01-01" : minDate) || new Date(2025, 0, 1);
+  const end = parseDate(maxDate) || new Date();
+  start.setDate(start.getDate() - ((start.getDay() + 3) % 7));
+  const weeks = [];
+  for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 7)) {
+    const weekStart = new Date(cursor);
+    const weekEnd = new Date(cursor);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    weeks.push(weekOption(formatLocalDate(weekStart), formatLocalDate(weekEnd)));
+  }
+  return weeks.reverse();
+}
+
+function formatLocalDate(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function moneyText(value: number): string {

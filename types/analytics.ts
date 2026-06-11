@@ -42,6 +42,13 @@ export type DimDate = {
   week: string;
 };
 
+export type WeekOption = {
+  key: string;
+  start: string;
+  end: string;
+  label: string;
+};
+
 export type AnalyticsFilters = {
   preset: DatePreset;
   start?: string;
@@ -192,6 +199,11 @@ export type AnalyticsResponse = {
   generatedAt: string;
   cached: boolean;
   filters: AnalyticsFilters;
+  dateRange: {
+    start: string;
+    end: string;
+    label: string;
+  };
   kpis: Kpis;
   comparison: ComparisonSummary;
   trend: TrendPoint[];
@@ -219,5 +231,6 @@ export type AnalyticsResponse = {
     countries: DimCountry[];
     products: DimProduct[];
     dates: DimDate[];
+    weeks: WeekOption[];
   };
 };

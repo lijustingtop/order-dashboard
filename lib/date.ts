@@ -6,6 +6,12 @@ export function formatDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+export function formatChineseDate(value: string): string {
+  const date = parseDate(value);
+  if (!date) return value;
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
 export function parseDate(value: string): Date | null {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!match) return null;
@@ -70,6 +76,15 @@ export function dateDimension(date: string) {
   const year = parsed?.getFullYear() ?? Number(date.slice(0, 4));
   const month = date.slice(0, 7);
   return { date, year, month, week: getThursdayWeek(parsed || new Date(date)) };
+}
+
+export function weekOption(start: string, end: string) {
+  return {
+    key: `${start}__${end}`,
+    start,
+    end,
+    label: `${formatChineseDate(start)}到${formatChineseDate(end)}`,
+  };
 }
 
 function getThursdayWeek(date: Date): string {

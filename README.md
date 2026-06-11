@@ -32,6 +32,10 @@ SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_xxx
 SHOPIFY_API_VERSION=2026-07
 ```
 
+不要把真实 `.env.local` 提交到 GitHub。Shopify Admin Token 必须放在部署平台的环境变量或 GitHub Secrets 里。
+
+注意：GitHub Pages 只适合静态页面，不能安全保存 Shopify Admin Token，也不能运行本项目的 `/api/analytics`、`/api/shopify/sync` 这类服务端接口。生产部署建议使用 Vercel、Netlify、Railway 或自有服务器，并在平台后台配置上述环境变量。
+
 同步接口：
 
 ```text
