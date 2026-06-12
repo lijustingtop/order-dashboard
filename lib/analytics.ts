@@ -225,21 +225,27 @@ function summarizeDiscounts(facts: FactOrder[]): DiscountDetailRow[] {
 
 
 function summarizeRefunds(facts: FactOrder[]): RefundDetailRow[] {
-  return facts
-    .filter((row) => row.eventType === "refund" && row.refundAmount > 0)
-    .map((row) => ({
-      refundId: row.refundId || `${row.orderId}-${row.refundDate || row.date}`,
-      orderId: row.orderId,
-      orderDate: row.orderDate,
-      refundDate: row.refundDate || row.date,
-      country: row.country,
-      sku: row.model || row.sku,
-      productTitle: row.productTitle,
-      refundReason: row.refundReason || "未填写",
-      salesAmount: row.salesAmount,
-      refundAmount: row.refundAmount,
-      customerEmail: row.customerEmail || "未提供",
-    }))
+  const refundFacts = facts.filter((row) => row.eventType === "refund" && row.refundAmount > 0);
+  return [...groupBy(refundFacts, (row) => row.orderId).entries()]
+    .map(([orderId, group]) => {
+      const refundDates = group.map((row) => row.refundDate || row.date).filter(Boolean).sort();
+      const skus = [...new Set(group.map((row) => row.model || row.sku))];
+      const reasons = [...new Set(group.map((row) => row.refundReason || "未填写"))];
+      return {
+        refundId: [...new Set(group.map((row) => row.refundId || `${row.orderId}-${row.refundDate || row.date}`))].join(", "),
+        orderId,
+        orderDate: group[0]?.orderDate || "",
+        refundDate: refundDates.at(-1) || group[0]?.date || "",
+        country: group[0]?.country || "未知",
+        sku: skus.join(", "),
+        skus,
+        productTitle: [...new Set(group.map((row) => row.productTitle))].join(", "),
+        refundReason: reasons.join(", "),
+        salesAmount: sum(group, "salesAmount"),
+        refundAmount: sum(group, "refundAmount"),
+        customerEmail: group[0]?.customerEmail || "未提供",
+      };
+    })
     .sort((a, b) => b.refundDate.localeCompare(a.refundDate))
     .slice(0, 120);
 }

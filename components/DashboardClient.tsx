@@ -634,7 +634,7 @@ function RefundAnalysis({ rows, dateRange }: { rows: AnalyticsResponse["refundRo
           <h2>退款分析</h2>
           <p>{dateRange?.label || "当前筛选时间段"} · 按退款处理时间统计</p>
         </div>
-        <span>{rows.length} lines</span>
+        <span>{rows.length} orders</span>
       </div>
       <div className="orders-table">
         <table>

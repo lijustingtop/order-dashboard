@@ -188,6 +188,7 @@ export type RefundDetailRow = {
   refundDate: string;
   country: string;
   sku: string;
+  skus: string[];
   productTitle: string;
   refundReason: string;
   salesAmount: number;
