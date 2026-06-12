@@ -528,14 +528,16 @@ function resolveRankTarget(view: ViewKey, selectedCountry: string, selectedModel
 }
 
 function RecentOrders({ rows, compact, dateRange }: { rows: AnalyticsResponse["recentOrders"]; compact?: boolean; dateRange?: AnalyticsResponse["dateRange"] }) {
+  const distinctOrders = new Set(rows.map((row) => row.orderId)).size;
+  const totalQuantity = rows.reduce((sum, row) => sum + row.quantity, 0);
   return (
     <section className="glass-card orders-card">
       <div className="card-title-row">
         <div>
           <h2>订单明细</h2>
-          <p>{dateRange?.label || "当前筛选时间段"} · 当前返回 {rows.length} 条</p>
+          <p>{dateRange?.label || "当前筛选时间段"} · 明细行 {rows.length} · 去重订单 {distinctOrders} · 销量 {formatNumber(totalQuantity)}</p>
         </div>
-        <span>{rows.length} lines</span>
+        <span>{distinctOrders} orders</span>
       </div>
       <div className={compact ? "orders-table compact" : "orders-table"}>
         <table>
