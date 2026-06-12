@@ -60,6 +60,7 @@ export type AnalyticsFilters = {
   search?: string;
   rankOffset?: number;
   rankLimit?: number;
+  includeRefundReport?: boolean;
 };
 
 export type Kpis = {
@@ -196,6 +197,23 @@ export type RefundDetailRow = {
   customerEmail: string;
 };
 
+export type ShopifyqlRefundRow = {
+  day: string;
+  saleId: string;
+  orderName: string;
+  productTitleAtTimeOfSale: string;
+  grossReturns: number;
+  discountsReturned: number;
+  netReturns: number;
+  shippingReturned: number;
+  taxesReturned: number;
+  returnFees: number;
+  totalReturns: number;
+  country: string;
+  refundReason: string;
+  customerEmail: string;
+};
+
 export type CachedAnalysis = {
   path: string;
   content: string;
@@ -237,6 +255,8 @@ export type AnalyticsResponse = {
   customerRows: CustomerRankingRow[];
   discountRows: DiscountDetailRow[];
   refundRows: RefundDetailRow[];
+  shopifyqlRefundRows: ShopifyqlRefundRow[];
+  shopifyqlRefundError?: string;
   analysis: CachedAnalysis;
   drilldowns: {
     countryModels: Record<string, DrilldownRankingRow[]>;

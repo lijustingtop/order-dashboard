@@ -7,6 +7,11 @@ type ShopifyGraphqlResponse<T> = {
   errors?: Array<{ message: string }>;
 };
 
+type ShopifyqlTableData = {
+  columns?: Array<{ name?: string; displayName?: string; dataType?: string }>;
+  rows?: unknown[];
+};
+
 export async function startOrdersBulkOperation() {
   const mutation = `
     mutation {
@@ -110,7 +115,30 @@ export async function currentBulkOperation() {
   `);
 }
 
-async function shopifyGraphql<T>(query: string): Promise<ShopifyGraphqlResponse<T>> {
+export async function shopifyqlQuery(queryText: string) {
+  return shopifyGraphql<{
+    shopifyqlQuery?: {
+      tableData?: ShopifyqlTableData;
+      parseErrors?: string[];
+    };
+  }>(`
+    query Shopifyql($query: String!) {
+      shopifyqlQuery(query: $query) {
+        tableData {
+          columns {
+            name
+            displayName
+            dataType
+          }
+          rows
+        }
+        parseErrors
+      }
+    }
+  `, { query: queryText });
+}
+
+async function shopifyGraphql<T>(query: string, variables?: Record<string, unknown>): Promise<ShopifyGraphqlResponse<T>> {
   const shop = process.env.SHOPIFY_SHOP_DOMAIN;
   const token = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
   if (!shop || !token) {
@@ -125,7 +153,7 @@ async function shopifyGraphql<T>(query: string): Promise<ShopifyGraphqlResponse<
           "Content-Type": "application/json",
           "X-Shopify-Access-Token": token,
         },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, variables }),
         cache: "no-store",
       });
       return response.json() as Promise<ShopifyGraphqlResponse<T>>;
@@ -135,15 +163,15 @@ async function shopifyGraphql<T>(query: string): Promise<ShopifyGraphqlResponse<
     }
   }
   try {
-    return await shopifyHttpsRequest<T>(shop, token, query);
+    return await shopifyHttpsRequest<T>(shop, token, query, variables);
   } catch (error) {
     const fallbackError = error instanceof Error ? error.message : "Unknown Shopify fallback error";
     return { errors: [{ message: `Shopify request failed after retries: ${lastError}; fallback failed: ${fallbackError}` }] };
   }
 }
 
-function shopifyHttpsRequest<T>(shop: string, token: string, query: string): Promise<ShopifyGraphqlResponse<T>> {
-  const body = JSON.stringify({ query });
+function shopifyHttpsRequest<T>(shop: string, token: string, query: string, variables?: Record<string, unknown>): Promise<ShopifyGraphqlResponse<T>> {
+  const body = JSON.stringify({ query, variables });
   return new Promise((resolve, reject) => {
     const request = https.request({
       hostname: shop,

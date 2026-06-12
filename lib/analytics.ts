@@ -3,6 +3,7 @@ import path from "node:path";
 import { dateDimension, formatChineseDate, inRange, parseDate, previousRange, previousYearRange, resolveDateRange, weekOption } from "@/lib/date";
 import { loadFactOrders } from "@/lib/fact-orders";
 import { niceScale } from "@/lib/nice-scale";
+import { shopifyqlQuery } from "@/lib/shopify";
 import type {
   AnalyticsFilters,
   AnalyticsResponse,
@@ -18,6 +19,7 @@ import type {
   OrderDetailRow,
   RankingRow,
   RefundDetailRow,
+  ShopifyqlRefundRow,
   SkuAnalysisRow,
   TrendMetric,
   TrendPoint,
@@ -59,6 +61,7 @@ function normalizeFilters(filters: AnalyticsFilters): AnalyticsFilters {
     search: filters.search?.trim() || "",
     rankOffset: Math.max(0, Number(filters.rankOffset || 0)),
     rankLimit: Math.min(100, Math.max(10, Number(filters.rankLimit || 10))),
+    includeRefundReport: Boolean(filters.includeRefundReport),
   };
 }
 
@@ -86,6 +89,7 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
   const customerRows = summarizeCustomers(facts);
   const discountRows = summarizeDiscounts(facts);
   const refundRows = summarizeRefunds(facts);
+  const shopifyqlRefundReport = filters.includeRefundReport ? await summarizeShopifyqlRefunds(range, refundRows) : { rows: [] };
   const comparison = summarizeComparison(kpis, summarizeKpis(previousPeriodFacts), summarizeKpis(previousYearFacts));
   const analysis = await loadOrCreateAnalysis(range, filters, kpis, comparison, trend, skuRows, countryRows);
   const rankOffset = filters.rankOffset || 0;
@@ -119,6 +123,8 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
     customerRows,
     discountRows,
     refundRows,
+    shopifyqlRefundRows: shopifyqlRefundReport.rows,
+    shopifyqlRefundError: shopifyqlRefundReport.error,
     analysis,
     drilldowns: buildDrilldowns(facts),
     dimensions: {
@@ -248,6 +254,87 @@ function summarizeRefunds(facts: FactOrder[]): RefundDetailRow[] {
     })
     .sort((a, b) => b.refundDate.localeCompare(a.refundDate))
     .slice(0, 120);
+}
+
+async function summarizeShopifyqlRefunds(range: { start: string; end: string }, fallbackRows: RefundDetailRow[]): Promise<{ rows: ShopifyqlRefundRow[]; error?: string }> {
+  const query = `
+    FROM sales
+      SHOW gross_returns, discounts_returned, net_returns, shipping_returned,
+        taxes_returned, return_fees, total_returns
+      WHERE is_return_related = true
+      GROUP BY day, sale_id, order_name, product_title_at_time_of_sale WITH TOTALS
+      TIMESERIES day
+      SINCE ${range.start} UNTIL ${range.end}
+      ORDER BY day ASC, order_name ASC, sale_id ASC
+      LIMIT 1000
+    VISUALIZE total_returns TYPE table
+  `;
+  const response = await shopifyqlQuery(query);
+  const apiError = response.errors?.map((error) => error.message).join("；");
+  if (apiError) return { rows: [], error: apiError };
+
+  const report = response.data?.shopifyqlQuery;
+  const parseError = report?.parseErrors?.filter(Boolean).join("；");
+  if (parseError) return { rows: [], error: parseError };
+
+  const columns = report?.tableData?.columns?.map((column) => column.name || column.displayName || "") || [];
+  const rawRows = report?.tableData?.rows || [];
+  const fallbackByOrder = new Map(fallbackRows.map((row) => [row.orderId, row]));
+
+  const rows = rawRows
+    .map((row) => {
+      const orderName = textValue(tableValue(row, columns, "order_name"));
+      const fallback = fallbackByOrder.get(orderName);
+      return {
+        day: dateText(tableValue(row, columns, "day")),
+        saleId: textValue(tableValue(row, columns, "sale_id")),
+        orderName,
+        productTitleAtTimeOfSale: textValue(tableValue(row, columns, "product_title_at_time_of_sale")),
+        grossReturns: numberValue(tableValue(row, columns, "gross_returns")),
+        discountsReturned: numberValue(tableValue(row, columns, "discounts_returned")),
+        netReturns: numberValue(tableValue(row, columns, "net_returns")),
+        shippingReturned: numberValue(tableValue(row, columns, "shipping_returned")),
+        taxesReturned: numberValue(tableValue(row, columns, "taxes_returned")),
+        returnFees: numberValue(tableValue(row, columns, "return_fees")),
+        totalReturns: numberValue(tableValue(row, columns, "total_returns")),
+        country: fallback?.country || "未返回",
+        refundReason: fallback?.refundReason || "ShopifyQL 未返回",
+        customerEmail: fallback?.customerEmail || "未返回",
+      };
+    })
+    .filter((row) => row.orderName || row.totalReturns);
+
+  return { rows };
+}
+
+function tableValue(row: unknown, columns: string[], key: string): unknown {
+  if (Array.isArray(row)) {
+    const index = columns.findIndex((column) => column === key);
+    return index >= 0 ? row[index] : undefined;
+  }
+  if (row && typeof row === "object") {
+    return (row as Record<string, unknown>)[key];
+  }
+  return undefined;
+}
+
+function textValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "object" && "value" in value) return textValue((value as { value?: unknown }).value);
+  return String(value);
+}
+
+function dateText(value: unknown): string {
+  const text = textValue(value);
+  return text.includes("T") ? text.slice(0, 10) : text;
+}
+
+function numberValue(value: unknown): number {
+  if (value == null) return 0;
+  if (typeof value === "object" && "value" in value) return numberValue((value as { value?: unknown }).value);
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const parsed = Number(String(value).replace(/[^0-9.-]+/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function summarizeCountry(facts: FactOrder[]): CountryAnalysisRow[] {

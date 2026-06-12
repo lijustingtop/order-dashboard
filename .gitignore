@@ -13,3 +13,4 @@ dist/
 /tableConvert.com_tib0sx.csv
 /库存型号清单.xlsx
 .~*.xlsx
+.vercel

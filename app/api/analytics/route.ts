@@ -22,5 +22,6 @@ export function filtersFromUrl(params: URLSearchParams): AnalyticsFilters {
     search: params.get("search") || "",
     rankOffset: Number(params.get("rankOffset") || 0),
     rankLimit: Number(params.get("rankLimit") || 10),
+    includeRefundReport: params.get("refundReport") === "1",
   };
 }

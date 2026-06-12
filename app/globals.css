@@ -555,6 +555,18 @@ table {
   overflow: auto;
 }
 
+.report-warning {
+  margin: 0 0 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: rgba(239, 246, 255, 0.82);
+  color: #1e40af;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.55;
+}
+
 .orders-table.compact {
   max-height: 250px;
 }
