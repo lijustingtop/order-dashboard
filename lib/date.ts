@@ -79,12 +79,24 @@ export function dateDimension(date: string) {
 }
 
 export function weekOption(start: string, end: string) {
+  const startDate = parseDate(start);
+  const year = startDate?.getFullYear() || Number(start.slice(0, 4));
   return {
     key: `${start}__${end}`,
     start,
     end,
-    label: `${formatChineseDate(start)}到${formatChineseDate(end)}`,
+    label: `${String(year).slice(2)}年第${weekNumberFromThursdayStart(start)}周（${formatChineseDate(start)}到${formatChineseDate(end)}）`,
   };
+}
+
+export function weekNumberFromThursdayStart(start: string): number {
+  const date = parseDate(start);
+  if (!date) return 1;
+  const year = date.getFullYear();
+  const first = new Date(year, 0, 1);
+  first.setHours(0, 0, 0, 0);
+  first.setDate(first.getDate() - ((first.getDay() + 3) % 7));
+  return Math.floor((date.getTime() - first.getTime()) / DAY_MS / 7) + 1;
 }
 
 function getThursdayWeek(date: Date): string {

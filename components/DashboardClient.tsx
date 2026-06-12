@@ -24,7 +24,9 @@ const navItems = [
   { value: "countries", label: "国家分析" },
   { value: "products", label: "型号分析" },
   { value: "orders", label: "订单明细" },
+  { value: "customers", label: "客户排行" },
   { value: "refunds", label: "退款分析" },
+  { value: "discounts", label: "优惠券明细" },
 ] as const;
 
 type ViewKey = (typeof navItems)[number]["value"];
@@ -96,7 +98,7 @@ export default function DashboardClient() {
   const modelSalesRows = buildRankRows(data, "model", "sales");
   const modelQuantityRows = buildRankRows(data, "model", "quantity");
   const weekOptions = data?.dimensions.weeks ?? [];
-  const viewTitle = selectedCountry && activeView === "countries" ? `${selectedCountry} Overview` : selectedModel && activeView === "products" ? `${selectedModel} Overview` : activeView === "orders" ? "订单明细" : activeView === "refunds" ? "退款分析" : "Overview";
+  const viewTitle = selectedCountry && activeView === "countries" ? `${selectedCountry} Overview` : selectedModel && activeView === "products" ? `${selectedModel} Overview` : activeView === "orders" ? "订单明细" : activeView === "customers" ? "客户排行" : activeView === "refunds" ? "退款分析" : activeView === "discounts" ? "优惠券明细" : "Overview";
 
   return (
     <main className="apple-shell">
@@ -147,7 +149,7 @@ export default function DashboardClient() {
             setEnd(option.end);
           }}>
             <option value="">周区间快捷选择</option>
-            {weekOptions.map((week, index) => <option key={week.key} value={week.key}>第 {weekOptions.length - index} 周：{week.label}</option>)}
+            {weekOptions.map((week) => <option key={week.key} value={week.key}>{week.label}</option>)}
           </select>
           {preset === "custom" ? (
             <>
@@ -199,7 +201,7 @@ export default function DashboardClient() {
           </div>
         </section>
 
-        {activeView !== "orders" && activeView !== "refunds" ? (
+        {activeView !== "orders" && activeView !== "customers" && activeView !== "refunds" && activeView !== "discounts" ? (
           <>
             <section className={activeView === "overview" ? "hero-grid chart-only" : "hero-grid"}>
               <div className="glass-card chart-card">
@@ -279,13 +281,16 @@ export default function DashboardClient() {
                     }}
                   />
                 </section>
-                <CustomerRanking rows={data?.customerRows ?? []} />
                 <AnalysisPanel analysis={data?.analysis} />
               </>
             ) : null}
           </>
+        ) : activeView === "customers" ? (
+          <CustomerRanking rows={data?.customerRows ?? []} dateRange={data?.dateRange} />
         ) : activeView === "refunds" ? (
-          <RefundAnalysis rows={data?.refundRows ?? []} />
+          <RefundAnalysis rows={data?.refundRows ?? []} dateRange={data?.dateRange} />
+        ) : activeView === "discounts" ? (
+          <DiscountDetails rows={data?.discountRows ?? []} dateRange={data?.dateRange} />
         ) : (
           <RecentOrders rows={data?.recentOrders ?? []} dateRange={data?.dateRange} />
         )}
@@ -580,13 +585,13 @@ function AnalysisPanel({ analysis }: { analysis?: AnalyticsResponse["analysis"] 
   );
 }
 
-function CustomerRanking({ rows }: { rows: AnalyticsResponse["customerRows"] }) {
+function CustomerRanking({ rows, dateRange }: { rows: AnalyticsResponse["customerRows"]; dateRange?: AnalyticsResponse["dateRange"] }) {
   return (
     <section className="glass-card orders-card">
       <div className="card-title-row">
         <div>
           <h2>客户购买 TOP10</h2>
-          <p>按当前时间段销售额排序</p>
+          <p>{dateRange?.label || "当前筛选时间段"} · 按销售额排序</p>
         </div>
       </div>
       <div className="orders-table compact">
@@ -619,13 +624,13 @@ function CustomerRanking({ rows }: { rows: AnalyticsResponse["customerRows"] }) 
   );
 }
 
-function RefundAnalysis({ rows }: { rows: AnalyticsResponse["refundRows"] }) {
+function RefundAnalysis({ rows, dateRange }: { rows: AnalyticsResponse["refundRows"]; dateRange?: AnalyticsResponse["dateRange"] }) {
   return (
     <section className="glass-card orders-card">
       <div className="card-title-row">
         <div>
           <h2>退款分析</h2>
-          <p>按退款处理时间统计</p>
+          <p>{dateRange?.label || "当前筛选时间段"} · 按退款处理时间统计</p>
         </div>
         <span>{rows.length} lines</span>
       </div>
@@ -655,6 +660,50 @@ function RefundAnalysis({ rows }: { rows: AnalyticsResponse["refundRows"] }) {
                 <td>{formatMoney(row.salesAmount)}</td>
                 <td>{formatMoney(row.refundAmount)}</td>
                 <td>{row.refundReason}</td>
+                <td>{row.customerEmail}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function DiscountDetails({ rows, dateRange }: { rows: AnalyticsResponse["discountRows"]; dateRange?: AnalyticsResponse["dateRange"] }) {
+  return (
+    <section className="glass-card orders-card">
+      <div className="card-title-row">
+        <div>
+          <h2>优惠券明细</h2>
+          <p>{dateRange?.label || "当前筛选时间段"} · 按优惠金额排序</p>
+        </div>
+        <span>{rows.length} lines</span>
+      </div>
+      <div className="orders-table">
+        <table>
+          <thead>
+            <tr>
+              <th>订单号</th>
+              <th>日期</th>
+              <th>国家</th>
+              <th>优惠码</th>
+              <th>型号</th>
+              <th>销售额</th>
+              <th>优惠金额</th>
+              <th>邮件</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${row.orderId}-${row.code}`}>
+                <td>{row.orderId}</td>
+                <td>{row.date}</td>
+                <td>{row.country}</td>
+                <td>{row.code}</td>
+                <td>{row.models.join(", ")}</td>
+                <td>{formatMoney(row.salesAmount)}</td>
+                <td>{formatMoney(row.discountAmount)}</td>
                 <td>{row.customerEmail}</td>
               </tr>
             ))}

@@ -9,6 +9,30 @@ type ShopifyOrderNode = {
   email?: string;
   currencyCode?: string;
   subtotalLineItemsQuantity?: number;
+  totalDiscountsSet?: {
+    shopMoney?: {
+      amount?: string;
+      currencyCode?: string;
+    };
+  };
+  discountApplications?: {
+    edges?: Array<{
+      node?: {
+        __typename?: string;
+        code?: string;
+        value?: {
+          __typename?: string;
+          amount?: string;
+          currencyCode?: string;
+          percentage?: number;
+        };
+      };
+    }>;
+    nodes?: Array<{
+      __typename?: string;
+      code?: string;
+    }>;
+  };
   shippingAddress?: { countryCodeV2?: string } | null;
   customer?: {
     displayName?: string;
@@ -99,6 +123,8 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
     const items = (lineItems.get(order.id) || []).filter((item) => !isAccessory(item));
     if (!items.length) continue;
     const orderSales = items.reduce((total, item) => total + moneyAmount(item.discountedTotalSet?.shopMoney?.amount), 0);
+    const orderDiscount = moneyAmount(order.totalDiscountsSet?.shopMoney?.amount);
+    const discountCodes = discountCodesFromOrder(order);
     const orderDate = order.createdAt ? formatDate(new Date(order.createdAt)) : "";
     const customerName = order.customer?.displayName || order.name || "未知客户";
     const customerEmail = order.customer?.email || order.email || "";
@@ -108,6 +134,7 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
       const cleanedSku = normalizeSku(item.sku || item.title || "UNKNOWN");
       const productTitle = normalizeProductTitle(item.title || cleanedSku);
       if (cleanedSku === "UNKNOWN" && productTitle === "UNKNOWN") continue;
+      const salesShare = orderSales > 0 ? salesAmount / orderSales : 1 / items.length;
       facts.push({
         orderId: order.name || order.id,
         date: orderDate,
@@ -119,6 +146,8 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
         quantity: Number(item.quantity || 0),
         salesAmount,
         refundAmount: 0,
+        discountAmount: orderDiscount * salesShare,
+        discountCodes,
         currency: item.discountedTotalSet?.shopMoney?.currencyCode || order.currencyCode || "USD",
         customerName,
         customerEmail,
@@ -217,6 +246,17 @@ function countryName(countryCode?: string): string {
 
 function isAccessory(item: ShopifyLineItemNode): boolean {
   return `${item.sku || ""} ${item.title || ""}`.toLowerCase().includes("accessories");
+}
+
+function discountCodesFromOrder(order: ShopifyOrderNode): string[] {
+  const edges = order.discountApplications?.edges || [];
+  const edgeCodes = edges
+    .map((edge) => edge.node?.code)
+    .filter((code): code is string => Boolean(code));
+  const nodeCodes = (order.discountApplications?.nodes || [])
+    .map((node) => node.code)
+    .filter((code): code is string => Boolean(code));
+  return [...new Set([...edgeCodes, ...nodeCodes])].filter(Boolean);
 }
 
 export function normalizeSku(value: string): string {

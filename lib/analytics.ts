@@ -11,6 +11,7 @@ import type {
   CountryRankingRow,
   CountryAnalysisRow,
   CustomerRankingRow,
+  DiscountDetailRow,
   DrilldownRankingRow,
   FactOrder,
   Kpis,
@@ -83,6 +84,7 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
   const countryRows = summarizeCountry(facts);
   const recentOrders = summarizeRecentOrders(facts);
   const customerRows = summarizeCustomers(facts);
+  const discountRows = summarizeDiscounts(facts);
   const refundRows = summarizeRefunds(facts);
   const comparison = summarizeComparison(kpis, summarizeKpis(previousPeriodFacts), summarizeKpis(previousYearFacts));
   const analysis = await loadOrCreateAnalysis(range, filters, kpis, comparison, trend, skuRows, countryRows);
@@ -115,6 +117,7 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
     countryRows,
     recentOrders,
     customerRows,
+    discountRows,
     refundRows,
     analysis,
     drilldowns: buildDrilldowns(facts),
@@ -205,6 +208,21 @@ function summarizeCustomers(facts: FactOrder[]): CustomerRankingRow[] {
     salesAmount: sum(group, "salesAmount"),
   })).sort((a, b) => b.salesAmount - a.salesAmount).slice(0, 10);
 }
+
+function summarizeDiscounts(facts: FactOrder[]): DiscountDetailRow[] {
+  const salesFacts = facts.filter((row) => row.eventType === "sale" && (row.discountAmount || 0) > 0);
+  return [...groupBy(salesFacts, (row) => `${row.orderId}__${((row.discountCodes?.length ? row.discountCodes : ["自动折扣"])).join(",")}`).entries()].map(([, group]) => ({
+    orderId: group[0]?.orderId || "",
+    date: group[0]?.orderDate || group[0]?.date || "",
+    country: group[0]?.country || "未知",
+    code: [...new Set(group.flatMap((row) => row.discountCodes?.length ? row.discountCodes : ["自动折扣"]))].join(", "),
+    models: [...new Set(group.map((row) => row.model || row.sku))],
+    salesAmount: sum(group, "salesAmount"),
+    discountAmount: sum(group, "discountAmount"),
+    customerEmail: group[0]?.customerEmail || "未提供",
+  })).sort((a, b) => b.discountAmount - a.discountAmount).slice(0, 200);
+}
+
 
 function summarizeRefunds(facts: FactOrder[]): RefundDetailRow[] {
   return facts

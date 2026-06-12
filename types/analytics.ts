@@ -15,6 +15,8 @@ export type FactOrder = {
   refundAmount: number;
   refundDate?: string;
   refundId?: string;
+  discountAmount?: number;
+  discountCodes?: string[];
   currency: string;
   customerName?: string;
   customerEmail?: string;
@@ -168,6 +170,17 @@ export type CustomerRankingRow = {
   salesAmount: number;
 };
 
+export type DiscountDetailRow = {
+  orderId: string;
+  date: string;
+  country: string;
+  code: string;
+  models: string[];
+  salesAmount: number;
+  discountAmount: number;
+  customerEmail: string;
+};
+
 export type RefundDetailRow = {
   refundId: string;
   orderId: string;
@@ -221,6 +234,7 @@ export type AnalyticsResponse = {
   countryRows: CountryAnalysisRow[];
   recentOrders: OrderDetailRow[];
   customerRows: CustomerRankingRow[];
+  discountRows: DiscountDetailRow[];
   refundRows: RefundDetailRow[];
   analysis: CachedAnalysis;
   drilldowns: {

@@ -21,6 +21,20 @@ export async function startOrdersBulkOperation() {
                 createdAt
                 currencyCode
                 subtotalLineItemsQuantity
+                totalDiscountsSet { shopMoney { amount currencyCode } }
+                discountApplications {
+                  edges {
+                    node {
+                      __typename
+                      value {
+                        __typename
+                        ... on MoneyV2 { amount currencyCode }
+                        ... on PricingPercentageValue { percentage }
+                      }
+                      ... on DiscountCodeApplication { code }
+                    }
+                  }
+                }
                 shippingAddress { countryCodeV2 }
                 lineItems {
                   edges {
