@@ -339,7 +339,7 @@ async function loadOrCreateAnalysis(range: { start: string; end: string }, filte
     filters.countries.join("_") || "all-countries",
     filters.skus.join("_") || "all-models",
   ].join("__").replace(/[^a-zA-Z0-9._-]+/g, "-");
-  const dir = path.join(process.cwd(), "outputs", "analytics-analysis");
+  const dir = process.env.VERCEL ? path.join("/tmp", "analytics-analysis") : path.join(process.cwd(), "outputs", "analytics-analysis");
   const filePath = path.join(dir, `${key}.md`);
   const signature = analysisSignature(kpis, trend);
   try {
