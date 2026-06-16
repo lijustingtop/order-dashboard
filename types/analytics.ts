@@ -175,6 +175,42 @@ export type CustomerRankingRow = {
   salesAmount: number;
 };
 
+export type AccessoryAnalysisRow = {
+  key: string;
+  label: string;
+  quantity: number;
+  salesAmount: number;
+  orderCount: number;
+  withMachineOrderCount: number;
+  standaloneOrderCount: number;
+  attachRate: number;
+  topMachines: Array<{
+    sku: string;
+    quantity: number;
+    orderCount: number;
+    salesAmount: number;
+  }>;
+  orders: Array<{
+    orderId: string;
+    date: string;
+    country: string;
+    customerEmail: string;
+    accessorySku: string;
+    quantity: number;
+    salesAmount: number;
+    sameOrderMachines: Array<{
+      sku: string;
+      quantity: number;
+      salesAmount: number;
+    }>;
+    customerOtherMachines: Array<{
+      sku: string;
+      quantity: number;
+      salesAmount: number;
+    }>;
+  }>;
+};
+
 export type DiscountDetailRow = {
   orderId: string;
   date: string;
@@ -263,6 +299,7 @@ export type AnalyticsResponse = {
   countryRows: CountryAnalysisRow[];
   recentOrders: OrderDetailRow[];
   customerRows: CustomerRankingRow[];
+  accessoryAnalysis: AccessoryAnalysisRow[];
   discountRows: DiscountDetailRow[];
   refundRows: RefundDetailRow[];
   shopifyqlRefundRows: ShopifyqlRefundRow[];

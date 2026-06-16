@@ -7,6 +7,7 @@ import { shopifyqlQuery } from "@/lib/shopify";
 import type {
   AnalyticsFilters,
   AnalyticsResponse,
+  AccessoryAnalysisRow,
   CachedAnalysis,
   ComparisonSummary,
   CountryRankingRow,
@@ -87,6 +88,7 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
   const countryRows = summarizeCountry(facts);
   const recentOrders = summarizeRecentOrders(facts);
   const customerRows = summarizeCustomers(facts);
+  const accessoryAnalysis = summarizeAccessoryAnalysis(facts, allFacts);
   const discountRows = summarizeDiscounts(facts);
   const refundRows = summarizeRefunds(facts, allFacts);
   const shopifyqlRefundReport = filters.includeRefundReport ? await summarizeShopifyqlRefunds(range, refundRows) : { rows: [] };
@@ -121,6 +123,7 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
     countryRows,
     recentOrders,
     customerRows,
+    accessoryAnalysis,
     discountRows,
     refundRows,
     shopifyqlRefundRows: shopifyqlRefundReport.rows,
@@ -147,6 +150,123 @@ function buildCountryOptions(allFacts: FactOrder[], filters: AnalyticsFilters, r
       salesAmount: sum(group, "salesAmount"),
     }))
     .sort((a, b) => b.quantity - a.quantity || b.salesAmount - a.salesAmount || a.country.localeCompare(b.country));
+}
+
+function summarizeAccessoryAnalysis(facts: FactOrder[], allFacts: FactOrder[]): AccessoryAnalysisRow[] {
+  const salesFacts = facts.filter((row) => row.eventType === "sale");
+  const allSalesFacts = allFacts.filter((row) => row.eventType === "sale");
+  const salesByOrder = groupBy(allSalesFacts, (row) => row.orderId);
+  const salesByCustomer = groupBy(allSalesFacts.filter((row) => row.customerEmail), (row) => row.customerEmail || "");
+  const targets = [
+    { key: "mate-se", label: "Mate SE", match: (row: FactOrder) => accessoryText(row).includes("mate se") },
+    { key: "ex-pcie5", label: "BL/EX/深空灰色/PCIE5", match: (row: FactOrder) => accessoryText(row).includes("bl/ex/深空灰色/pcie5") },
+  ];
+
+  return targets.map((target) => {
+    const targetFacts = salesFacts.filter(target.match);
+    const targetByOrder = groupBy(targetFacts, (row) => row.orderId);
+    const trackedOrders = [...targetByOrder.entries()].map(([orderId, group]) => {
+      const sameOrderMachines = mergeMachineItems([
+        ...summarizeMachineItems((salesByOrder.get(orderId) || []).filter((row) => !target.match(row))),
+        ...extractComboMachines(group, target.match),
+      ]);
+      const customerEmail = group[0]?.customerEmail || "";
+      const customerFacts = salesByCustomer.get(customerEmail) || [];
+      const customerOtherMachines = mergeMachineItems([
+        ...summarizeMachineItems(customerFacts.filter((row) => !target.match(row))),
+        ...extractComboMachines(customerFacts.filter(target.match), target.match),
+      ]).slice(0, 8);
+      return {
+        orderId,
+        date: group[0]?.orderDate || group[0]?.date || "",
+        country: group[0]?.country || "未知",
+        customerEmail: customerEmail || "未提供",
+        accessorySku: [...new Set(group.map((row) => row.model || row.sku))].join(", "),
+        quantity: sum(group, "quantity"),
+        salesAmount: sum(group, "salesAmount"),
+        sameOrderMachines,
+        customerOtherMachines,
+      };
+    }).sort((a, b) => b.date.localeCompare(a.date));
+    const withMachineOrderCount = trackedOrders.filter((row) => row.sameOrderMachines.length > 0).length;
+    const machineFacts = trackedOrders.flatMap((row) => row.sameOrderMachines.map((machine) => ({ ...machine, orderId: row.orderId })));
+    return {
+      key: target.key,
+      label: target.label,
+      quantity: sum(targetFacts, "quantity"),
+      salesAmount: sum(targetFacts, "salesAmount"),
+      orderCount: targetByOrder.size,
+      withMachineOrderCount,
+      standaloneOrderCount: Math.max(0, targetByOrder.size - withMachineOrderCount),
+      attachRate: ratio(withMachineOrderCount, targetByOrder.size),
+      topMachines: summarizeMachineAttach(machineFacts),
+      orders: trackedOrders.slice(0, 80),
+    };
+  });
+}
+
+function accessoryText(row: FactOrder): string {
+  return `${row.model || ""} ${row.sku || ""} ${row.productTitle || ""}`.toLowerCase();
+}
+
+function summarizeMachineItems(facts: FactOrder[]) {
+  return [...groupBy(facts, (row) => row.model || row.sku).entries()]
+    .map(([sku, group]) => ({
+      sku,
+      quantity: sum(group, "quantity"),
+      salesAmount: sum(group, "salesAmount"),
+    }))
+    .filter((row) => isMachineSku(row.sku) && row.quantity > 0)
+    .sort((a, b) => b.quantity - a.quantity || b.salesAmount - a.salesAmount || a.sku.localeCompare(b.sku));
+}
+
+function extractComboMachines(facts: FactOrder[], isTarget: (row: FactOrder) => boolean) {
+  return facts.flatMap((row) => {
+    const text = row.model || row.sku;
+    if (!text.includes("+")) return [];
+    return text.split("+")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .filter((part) => !isTarget({ ...row, model: part, sku: part, productTitle: part }))
+      .filter(isMachineSku)
+      .map((sku) => ({
+        sku,
+        quantity: row.quantity,
+        salesAmount: 0,
+      }));
+  });
+}
+
+function mergeMachineItems(items: Array<{ sku: string; quantity: number; salesAmount: number }>) {
+  return [...groupBy(items, (row) => row.sku).entries()]
+    .map(([sku, group]) => ({
+      sku,
+      quantity: sum(group, "quantity"),
+      salesAmount: sum(group, "salesAmount"),
+    }))
+    .filter((row) => isMachineSku(row.sku) && row.quantity > 0)
+    .sort((a, b) => b.quantity - a.quantity || b.salesAmount - a.salesAmount || a.sku.localeCompare(b.sku));
+}
+
+function isMachineSku(sku: string): boolean {
+  const text = sku.toLowerCase();
+  if (!sku) return false;
+  if (text.includes("accessories") || text.includes("配件")) return false;
+  if (text.includes("mate se")) return false;
+  if (text.includes("bl/ex/深空灰色/pcie5")) return false;
+  return true;
+}
+
+function summarizeMachineAttach(items: Array<{ sku: string; quantity: number; salesAmount: number; orderId: string }>) {
+  return [...groupBy(items, (row) => row.sku).entries()]
+    .map(([sku, group]) => ({
+      sku,
+      quantity: sum(group, "quantity"),
+      orderCount: new Set(group.map((row) => row.orderId)).size,
+      salesAmount: sum(group, "salesAmount"),
+    }))
+    .sort((a, b) => b.quantity - a.quantity || b.salesAmount - a.salesAmount)
+    .slice(0, 10);
 }
 
 function summarizeKpis(facts: FactOrder[]): Kpis {

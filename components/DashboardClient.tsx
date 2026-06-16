@@ -284,6 +284,7 @@ export default function DashboardClient() {
                 <AnalysisPanel analysis={data?.analysis} />
               </>
             ) : null}
+            {activeView === "products" ? <AccessoryAnalysis rows={data?.accessoryAnalysis ?? []} dateRange={data?.dateRange} /> : null}
           </>
         ) : activeView === "customers" ? (
           <CustomerRanking rows={data?.customerRows ?? []} dateRange={data?.dateRange} />
@@ -624,6 +625,68 @@ function CustomerRanking({ rows, dateRange }: { rows: AnalyticsResponse["custome
             ))}
           </tbody>
         </table>
+      </div>
+    </section>
+  );
+}
+
+function AccessoryAnalysis({ rows, dateRange }: { rows: AnalyticsResponse["accessoryAnalysis"]; dateRange?: AnalyticsResponse["dateRange"] }) {
+  return (
+    <section className="glass-card orders-card accessory-card">
+      <div className="card-title-row">
+        <div>
+          <h2>Mate SE / EX 专属分析</h2>
+          <p>{dateRange?.label || "当前筛选时间段"} · 追踪同订单与同客户是否购买其他机器</p>
+        </div>
+      </div>
+      <div className="accessory-grid">
+        {rows.map((row) => (
+          <div key={row.key} className="accessory-panel">
+            <div className="accessory-head">
+              <div>
+                <h3>{row.label}</h3>
+                <p>{formatNumber(row.orderCount)} 单 · {formatNumber(row.quantity)} 件 · 相关销售额 {formatMoney(row.salesAmount)}</p>
+              </div>
+              <strong>{formatPercent(row.attachRate)}</strong>
+            </div>
+            <div className="accessory-metrics">
+              <span>同单购机 {formatNumber(row.withMachineOrderCount)}</span>
+              <span>单独购买 {formatNumber(row.standaloneOrderCount)}</span>
+            </div>
+            <div className="mini-machine-list">
+              <strong>同单机器 Top</strong>
+              {row.topMachines.length ? row.topMachines.map((machine) => (
+                <p key={machine.sku}><span>{machine.sku}</span><b>{formatNumber(machine.quantity)} 件</b></p>
+              )) : <p><span>暂无同单机器</span><b>-</b></p>}
+            </div>
+            <div className="orders-table accessory-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>订单号</th>
+                    <th>国家</th>
+                    <th>购买数量</th>
+                    <th>同订单机器</th>
+                    <th>同客户其他机器</th>
+                    <th>日期</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {row.orders.map((order) => (
+                    <tr key={`${row.key}-${order.orderId}`}>
+                      <td>{order.orderId}</td>
+                      <td>{order.country}</td>
+                      <td>{formatNumber(order.quantity)}</td>
+                      <td>{order.sameOrderMachines.length ? order.sameOrderMachines.map((item) => `${item.sku} x ${formatNumber(item.quantity)}`).join(", ") : "未同单购买机器"}</td>
+                      <td>{order.customerOtherMachines.length ? order.customerOtherMachines.map((item) => `${item.sku} x ${formatNumber(item.quantity)}`).join(", ") : "未发现"}</td>
+                      <td>{order.date}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
       </div>
     </section>
   );
