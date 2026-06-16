@@ -6,6 +6,7 @@ type ShopifyOrderNode = {
   id: string;
   name?: string;
   createdAt?: string;
+  displayFinancialStatus?: string;
   email?: string;
   currencyCode?: string;
   subtotalLineItemsQuantity?: number;
@@ -58,12 +59,42 @@ type ShopifyRefundNode = {
   __parentId?: string;
   id?: string;
   createdAt?: string;
-  processedAt?: string;
   note?: string;
   totalRefundedSet?: {
     shopMoney?: {
       amount?: string;
       currencyCode?: string;
+    };
+  };
+  refundLineItems?: {
+    edges?: Array<{
+      node?: ShopifyRefundLineItemNode;
+    }>;
+  };
+};
+
+type ShopifyRefundLineItemNode = {
+  quantity?: number;
+  subtotalSet?: {
+    shopMoney?: {
+      amount?: string;
+      currencyCode?: string;
+    };
+  };
+  totalTaxSet?: {
+    shopMoney?: {
+      amount?: string;
+      currencyCode?: string;
+    };
+  };
+  lineItem?: {
+    sku?: string;
+    title?: string;
+    discountedTotalSet?: {
+      shopMoney?: {
+        amount?: string;
+        currencyCode?: string;
+      };
     };
   };
 };
@@ -155,11 +186,48 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
       });
     }
 
+    const refundableStatus = order.displayFinancialStatus === "REFUNDED" || order.displayFinancialStatus === "PARTIALLY_REFUNDED";
     for (const refund of refunds.get(order.id) || []) {
       const refundAmount = moneyAmount(refund.totalRefundedSet?.shopMoney?.amount);
-      if (refundAmount <= 0) continue;
-      const refundDate = refund.processedAt || refund.createdAt;
+      if (!refundableStatus && refundAmount <= 0) continue;
+      const refundDate = refund.createdAt;
       const formattedRefundDate = refundDate ? formatDate(new Date(refundDate)) : "";
+      const refundLineItems = refund.refundLineItems?.edges?.map((edge) => edge.node).filter((node): node is ShopifyRefundLineItemNode => Boolean(node)) || [];
+      const usableRefundLineItems = refundLineItems.filter((line) => !isAccessory({ sku: line.lineItem?.sku, title: line.lineItem?.title }));
+
+      if (usableRefundLineItems.length) {
+        const lineSubtotal = usableRefundLineItems.reduce((total, line) => total + moneyAmount(line.subtotalSet?.shopMoney?.amount), 0);
+        for (const line of usableRefundLineItems) {
+          const cleanedSku = normalizeSku(line.lineItem?.sku || line.lineItem?.title || "UNKNOWN");
+          const productTitle = normalizeProductTitle(line.lineItem?.title || cleanedSku);
+          if (cleanedSku === "UNKNOWN" && productTitle === "UNKNOWN") continue;
+          const lineRefundAmount = moneyAmount(line.subtotalSet?.shopMoney?.amount) + moneyAmount(line.totalTaxSet?.shopMoney?.amount);
+          const refundShare = lineSubtotal > 0 ? moneyAmount(line.subtotalSet?.shopMoney?.amount) / lineSubtotal : 1 / usableRefundLineItems.length;
+          facts.push({
+            orderId: order.name || order.id,
+            date: formattedRefundDate,
+            orderDate,
+            eventType: "refund",
+            country,
+            sku: cleanedSku,
+            productTitle,
+            quantity: 0,
+            salesAmount: moneyAmount(line.lineItem?.discountedTotalSet?.shopMoney?.amount),
+            refundAmount: lineRefundAmount || refundAmount * refundShare,
+            refundDate: formattedRefundDate,
+            refundId: refund.id || `${order.id}-${formattedRefundDate}`,
+            refundStatus: order.displayFinancialStatus,
+            refundLineQuantity: Number(line.quantity || 0),
+            currency: line.subtotalSet?.shopMoney?.currencyCode || order.currencyCode || "USD",
+            customerName,
+            customerEmail,
+            model: modelFromSku(cleanedSku, productTitle),
+            refundReason: refund.note || "未填写",
+          });
+        }
+        continue;
+      }
+
       for (const item of items) {
         const salesAmount = moneyAmount(item.discountedTotalSet?.shopMoney?.amount);
         const cleanedSku = normalizeSku(item.sku || item.title || "UNKNOWN");
@@ -179,6 +247,8 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
           refundAmount: refundAmount * refundShare,
           refundDate: formattedRefundDate,
           refundId: refund.id || `${order.id}-${formattedRefundDate}`,
+          refundStatus: order.displayFinancialStatus,
+          refundLineQuantity: 0,
           currency: item.discountedTotalSet?.shopMoney?.currencyCode || order.currencyCode || "USD",
           customerName,
           customerEmail,

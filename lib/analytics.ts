@@ -128,12 +128,25 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
     analysis,
     drilldowns: buildDrilldowns(facts),
     dimensions: {
-      countries: [...groupBy(allFacts, (row) => row.country).entries()].map(([country, group]) => ({ country, orderCount: distinctCount(group, "orderId") })).sort((a, b) => a.country.localeCompare(b.country)),
+      countries: buildCountryOptions(allFacts, filters, range),
       products: [...groupBy(allFacts, (row) => row.model || row.sku).entries()].map(([sku, group]) => ({ sku, productTitle: sku || group[0]?.productTitle || sku })).sort((a, b) => a.sku.localeCompare(b.sku)),
       dates: [...new Set(allFacts.map((row) => row.date))].sort().map(dateDimension),
       weeks: buildWeekOptions(allFacts),
     },
   };
+}
+
+function buildCountryOptions(allFacts: FactOrder[], filters: AnalyticsFilters, range: { start: string; end: string }) {
+  const optionFacts = filterFacts(allFacts, { ...filters, countries: [] }, range).filter((row) => row.eventType === "sale");
+  const sourceFacts = optionFacts.length ? optionFacts : allFacts.filter((row) => row.eventType === "sale");
+  return [...groupBy(sourceFacts, (row) => row.country).entries()]
+    .map(([country, group]) => ({
+      country,
+      orderCount: distinctCount(group, "orderId"),
+      quantity: sum(group, "quantity"),
+      salesAmount: sum(group, "salesAmount"),
+    }))
+    .sort((a, b) => b.quantity - a.quantity || b.salesAmount - a.salesAmount || a.country.localeCompare(b.country));
 }
 
 function summarizeKpis(facts: FactOrder[]): Kpis {
@@ -242,6 +255,7 @@ function summarizeRefunds(facts: FactOrder[]): RefundDetailRow[] {
         orderId,
         orderDate: group[0]?.orderDate || "",
         refundDate: refundDates.at(-1) || group[0]?.date || "",
+        refundStatus: refundStatusText(group[0]?.refundStatus),
         country: group[0]?.country || "未知",
         sku: skus.join(", "),
         skus,
@@ -249,11 +263,18 @@ function summarizeRefunds(facts: FactOrder[]): RefundDetailRow[] {
         refundReason: reasons.join(", "),
         salesAmount: sum(group, "salesAmount"),
         refundAmount: sum(group, "refundAmount"),
+        refundQuantity: sum(group, "refundLineQuantity"),
         customerEmail: group[0]?.customerEmail || "未提供",
       };
     })
     .sort((a, b) => b.refundDate.localeCompare(a.refundDate))
     .slice(0, 120);
+}
+
+function refundStatusText(status?: string): string {
+  if (status === "REFUNDED") return "已退款";
+  if (status === "PARTIALLY_REFUNDED") return "部分退款";
+  return status || "已退款";
 }
 
 async function summarizeShopifyqlRefunds(range: { start: string; end: string }, fallbackRows: RefundDetailRow[]): Promise<{ rows: ShopifyqlRefundRow[]; error?: string }> {

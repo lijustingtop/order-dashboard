@@ -15,6 +15,8 @@ export type FactOrder = {
   refundAmount: number;
   refundDate?: string;
   refundId?: string;
+  refundStatus?: "REFUNDED" | "PARTIALLY_REFUNDED" | string;
+  refundLineQuantity?: number;
   discountAmount?: number;
   discountCodes?: string[];
   currency: string;
@@ -30,6 +32,8 @@ export type FactOrder = {
 export type DimCountry = {
   country: string;
   orderCount: number;
+  quantity?: number;
+  salesAmount?: number;
 };
 
 export type DimProduct = {
@@ -187,6 +191,7 @@ export type RefundDetailRow = {
   orderId: string;
   orderDate: string;
   refundDate: string;
+  refundStatus: string;
   country: string;
   sku: string;
   skus: string[];
@@ -194,6 +199,7 @@ export type RefundDetailRow = {
   refundReason: string;
   salesAmount: number;
   refundAmount: number;
+  refundQuantity: number;
   customerEmail: string;
 };
 

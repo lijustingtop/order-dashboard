@@ -24,6 +24,7 @@ export async function startOrdersBulkOperation() {
                 id
                 name
                 createdAt
+                displayFinancialStatus
                 currencyCode
                 subtotalLineItemsQuantity
                 totalDiscountsSet { shopMoney { amount currencyCode } }
@@ -54,7 +55,6 @@ export async function startOrdersBulkOperation() {
                 refunds {
                   id
                   createdAt
-                  processedAt
                   note
                   totalRefundedSet { shopMoney { amount currencyCode } }
                 }

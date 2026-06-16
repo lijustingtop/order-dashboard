@@ -67,7 +67,6 @@ export default function DashboardClient() {
     if (search) params.set("search", search);
     params.set("rankOffset", "0");
     params.set("rankLimit", "100");
-    if (activeView === "refunds") params.set("refundReport", "1");
     return params;
   }, [activeView, countries, end, models, preset, search, start]);
 
@@ -291,8 +290,6 @@ export default function DashboardClient() {
         ) : activeView === "refunds" ? (
           <RefundAnalysis
             rows={data?.refundRows ?? []}
-            shopifyqlRows={data?.shopifyqlRefundRows ?? []}
-            shopifyqlError={data?.shopifyqlRefundError}
             dateRange={data?.dateRange}
           />
         ) : activeView === "discounts" ? (
@@ -632,24 +629,18 @@ function CustomerRanking({ rows, dateRange }: { rows: AnalyticsResponse["custome
   );
 }
 
-function RefundAnalysis({ rows, shopifyqlRows, shopifyqlError, dateRange }: { rows: AnalyticsResponse["refundRows"]; shopifyqlRows: AnalyticsResponse["shopifyqlRefundRows"]; shopifyqlError?: string; dateRange?: AnalyticsResponse["dateRange"] }) {
-  const usingShopifyql = shopifyqlRows.length > 0;
+function RefundAnalysis({ rows, dateRange }: { rows: AnalyticsResponse["refundRows"]; dateRange?: AnalyticsResponse["dateRange"] }) {
   return (
     <section className="glass-card orders-card">
       <div className="card-title-row">
         <div>
           <h2>退款分析</h2>
-          <p>{dateRange?.label || "当前筛选时间段"} · {usingShopifyql ? "Shopify 后台 sales 报表口径" : "按退款处理时间统计"}</p>
+          <p>{dateRange?.label || "当前筛选时间段"} · 已退款 / 部分退款订单 · 按退款创建时间统计</p>
         </div>
-        <span>{usingShopifyql ? `${shopifyqlRows.length} lines` : `${rows.length} orders`}</span>
+        <span>{rows.length} orders</span>
       </div>
-      {shopifyqlError ? (
-        <div className="report-warning">
-          ShopifyQL 报表暂时无法读取：{shopifyqlError}
-        </div>
-      ) : null}
       <div className="orders-table">
-        {usingShopifyql ? <ShopifyqlRefundTable rows={shopifyqlRows} /> : <FallbackRefundTable rows={rows} />}
+        <FallbackRefundTable rows={rows} />
       </div>
     </section>
   );
@@ -702,10 +693,12 @@ function FallbackRefundTable({ rows }: { rows: AnalyticsResponse["refundRows"] }
       <thead>
         <tr>
           <th>订单号</th>
+          <th>状态</th>
           <th>退款时间</th>
           <th>订单时间</th>
           <th>国家</th>
           <th>型号</th>
+          <th>退款数量</th>
           <th>销售额</th>
           <th>退款额</th>
           <th>退款理由</th>
@@ -716,10 +709,12 @@ function FallbackRefundTable({ rows }: { rows: AnalyticsResponse["refundRows"] }
         {rows.map((row) => (
           <tr key={`${row.refundId}-${row.sku}-${row.refundAmount}`}>
             <td>{row.orderId}</td>
+            <td>{row.refundStatus}</td>
             <td>{row.refundDate}</td>
             <td>{row.orderDate}</td>
             <td>{row.country}</td>
             <td>{row.sku}</td>
+            <td>{row.refundQuantity ? formatNumber(row.refundQuantity) : "订单级退款"}</td>
             <td>{formatMoney(row.salesAmount)}</td>
             <td>{formatMoney(row.refundAmount)}</td>
             <td>{row.refundReason}</td>
