@@ -195,6 +195,10 @@ export type RefundDetailRow = {
   country: string;
   sku: string;
   skus: string[];
+  lineItems: Array<{
+    sku: string;
+    quantity: number;
+  }>;
   productTitle: string;
   refundReason: string;
   salesAmount: number;

@@ -697,8 +697,7 @@ function FallbackRefundTable({ rows }: { rows: AnalyticsResponse["refundRows"] }
           <th>退款时间</th>
           <th>订单时间</th>
           <th>国家</th>
-          <th>型号</th>
-          <th>退款数量</th>
+          <th>商品行 SKU / 数量</th>
           <th>销售额</th>
           <th>退款额</th>
           <th>退款理由</th>
@@ -713,8 +712,7 @@ function FallbackRefundTable({ rows }: { rows: AnalyticsResponse["refundRows"] }
             <td>{row.refundDate}</td>
             <td>{row.orderDate}</td>
             <td>{row.country}</td>
-            <td>{row.sku}</td>
-            <td>{row.refundQuantity ? formatNumber(row.refundQuantity) : "订单级退款"}</td>
+            <td>{row.lineItems.length ? row.lineItems.map((item) => `${item.sku} x ${formatNumber(item.quantity)}`).join(", ") : row.sku}</td>
             <td>{formatMoney(row.salesAmount)}</td>
             <td>{formatMoney(row.refundAmount)}</td>
             <td>{row.refundReason}</td>

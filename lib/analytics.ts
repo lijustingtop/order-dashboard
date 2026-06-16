@@ -88,7 +88,7 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
   const recentOrders = summarizeRecentOrders(facts);
   const customerRows = summarizeCustomers(facts);
   const discountRows = summarizeDiscounts(facts);
-  const refundRows = summarizeRefunds(facts);
+  const refundRows = summarizeRefunds(facts, allFacts);
   const shopifyqlRefundReport = filters.includeRefundReport ? await summarizeShopifyqlRefunds(range, refundRows) : { rows: [] };
   const comparison = summarizeComparison(kpis, summarizeKpis(previousPeriodFacts), summarizeKpis(previousYearFacts));
   const analysis = await loadOrCreateAnalysis(range, filters, kpis, comparison, trend, skuRows, countryRows);
@@ -243,12 +243,14 @@ function summarizeDiscounts(facts: FactOrder[]): DiscountDetailRow[] {
 }
 
 
-function summarizeRefunds(facts: FactOrder[]): RefundDetailRow[] {
+function summarizeRefunds(facts: FactOrder[], allFacts: FactOrder[]): RefundDetailRow[] {
   const refundFacts = facts.filter((row) => row.eventType === "refund" && row.refundAmount > 0);
+  const salesFactsByOrder = groupBy(allFacts.filter((row) => row.eventType === "sale"), (row) => row.orderId);
   return [...groupBy(refundFacts, (row) => row.orderId).entries()]
     .map(([orderId, group]) => {
       const refundDates = group.map((row) => row.refundDate || row.date).filter(Boolean).sort();
-      const skus = [...new Set(group.map((row) => row.model || row.sku))];
+      const orderLineItems = summarizeOrderLineItems(salesFactsByOrder.get(orderId) || group);
+      const skus = orderLineItems.length ? orderLineItems.map((line) => line.sku) : [...new Set(group.map((row) => row.model || row.sku))];
       const reasons = [...new Set(group.map((row) => row.refundReason || "未填写"))];
       return {
         refundId: [...new Set(group.map((row) => row.refundId || `${row.orderId}-${row.refundDate || row.date}`))].join(", "),
@@ -257,8 +259,9 @@ function summarizeRefunds(facts: FactOrder[]): RefundDetailRow[] {
         refundDate: refundDates.at(-1) || group[0]?.date || "",
         refundStatus: refundStatusText(group[0]?.refundStatus),
         country: group[0]?.country || "未知",
-        sku: skus.join(", "),
+        sku: orderLineItems.length ? orderLineItems.map((line) => `${line.sku} x ${line.quantity}`).join(", ") : skus.join(", "),
         skus,
+        lineItems: orderLineItems,
         productTitle: [...new Set(group.map((row) => row.productTitle))].join(", "),
         refundReason: reasons.join(", "),
         salesAmount: sum(group, "salesAmount"),
@@ -269,6 +272,16 @@ function summarizeRefunds(facts: FactOrder[]): RefundDetailRow[] {
     })
     .sort((a, b) => b.refundDate.localeCompare(a.refundDate))
     .slice(0, 120);
+}
+
+function summarizeOrderLineItems(facts: FactOrder[]) {
+  return [...groupBy(facts, (row) => row.model || row.sku).entries()]
+    .map(([sku, group]) => ({
+      sku,
+      quantity: sum(group, "quantity"),
+    }))
+    .filter((row) => row.sku && row.quantity > 0)
+    .sort((a, b) => b.quantity - a.quantity || a.sku.localeCompare(b.sku));
 }
 
 function refundStatusText(status?: string): string {
