@@ -98,6 +98,7 @@ export default function DashboardClient() {
   const modelSalesRows = buildRankRows(data, "model", "sales");
   const modelQuantityRows = buildRankRows(data, "model", "quantity");
   const weekOptions = data?.dimensions.weeks ?? [];
+  const selectedAccessoryAnalysis = buildSelectedAccessoryAnalysis(data, selectedModel);
   const viewTitle = selectedCountry && activeView === "countries" ? `${selectedCountry} Overview` : selectedModel && activeView === "products" ? `${selectedModel} Overview` : activeView === "orders" ? "订单明细" : activeView === "customers" ? "客户排行" : activeView === "refunds" ? "退款分析" : activeView === "discounts" ? "优惠券明细" : "Overview";
 
   return (
@@ -284,7 +285,7 @@ export default function DashboardClient() {
                 <AnalysisPanel analysis={data?.analysis} />
               </>
             ) : null}
-            {activeView === "products" ? <AccessoryAnalysis rows={data?.accessoryAnalysis ?? []} dateRange={data?.dateRange} /> : null}
+            {activeView === "products" && selectedAccessoryAnalysis.length ? <AccessoryAnalysis rows={selectedAccessoryAnalysis} dateRange={data?.dateRange} /> : null}
           </>
         ) : activeView === "customers" ? (
           <CustomerRanking rows={data?.customerRows ?? []} dateRange={data?.dateRange} />
@@ -501,6 +502,16 @@ function buildRankRows(data: AnalyticsResponse | null, target: RankTarget, metri
     value: metric === "quantity" ? formatNumber(row.quantity) : formatMoney(row.salesAmount),
     share: row.share,
   }));
+}
+
+function buildSelectedAccessoryAnalysis(data: AnalyticsResponse | null, selectedModel: string) {
+  if (!data || !selectedModel) return [];
+  const selected = selectedModel.toLowerCase();
+  return data.accessoryAnalysis.filter((row) => {
+    if (row.key === "mate-se") return selected.includes("mate se");
+    if (row.key === "ex-pcie5") return selected.includes("bl/ex/深空灰色/pcie5");
+    return false;
+  });
 }
 
 function shareTitle(group: ShareGroup, value: ShareValue) {
