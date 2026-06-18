@@ -263,6 +263,22 @@ export type ShopifyqlRefundRow = {
   customerEmail: string;
 };
 
+export type ShopifyqlRefundReport = {
+  rows: ShopifyqlRefundRow[];
+  totalRefundAmount: number;
+  error?: string;
+};
+
+export type ShopifyqlSalesSummary = {
+  grossSalesAmount: number;
+  discountAmount: number;
+  salesAmount: number;
+  refundAmount: number;
+  netSalesAmount: number;
+  totalSalesAmount: number;
+  error?: string;
+};
+
 export type CachedAnalysis = {
   path: string;
   content: string;

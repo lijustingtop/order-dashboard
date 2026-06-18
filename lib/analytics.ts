@@ -20,7 +20,9 @@ import type {
   OrderDetailRow,
   RankingRow,
   RefundDetailRow,
+  ShopifyqlRefundReport,
   ShopifyqlRefundRow,
+  ShopifyqlSalesSummary,
   SkuAnalysisRow,
   TrendMetric,
   TrendPoint,
@@ -84,8 +86,14 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
   const visiblePreviousPeriodFacts = previousPeriodFacts.filter((row) => !row.isAccessory);
   const visiblePreviousYearFacts = previousYearFacts.filter((row) => !row.isAccessory);
   const visibleAllFacts = allFacts.filter((row) => !row.isAccessory);
-  const kpis = summarizeKpis(facts);
-  const trend = summarizeTrend(visibleFacts);
+  const fallbackRefundRows = summarizeRefunds(visibleFacts, visibleAllFacts);
+  const [shopifyqlRefundReport, shopifyqlSalesSummary] = await Promise.all([
+    summarizeShopifyqlRefunds(range, fallbackRefundRows),
+    summarizeShopifyqlSalesSummary(range),
+  ]);
+  const refundRows = shopifyqlRefundReport.rows.length ? summarizeShopifyqlRefundRows(shopifyqlRefundReport.rows, fallbackRefundRows, visibleAllFacts) : fallbackRefundRows;
+  const kpis = summarizeKpis(facts, shopifyqlRefundReport.totalRefundAmount || undefined, shopifyqlSalesSummary);
+  const trend = applyShopifyqlRefundsToTrend(summarizeTrend(visibleFacts), shopifyqlRefundReport.rows);
   const previousPeriodTrend = summarizeTrend(visiblePreviousPeriodFacts);
   const previousYearTrend = summarizeTrend(visiblePreviousYearFacts);
   const skuRows = summarizeSku(visibleFacts);
@@ -94,8 +102,6 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
   const customerRows = summarizeCustomers(visibleFacts);
   const accessoryAnalysis = summarizeAccessoryAnalysis(visibleFacts, visibleAllFacts);
   const discountRows = summarizeDiscounts(visibleFacts);
-  const refundRows = summarizeRefunds(visibleFacts, visibleAllFacts);
-  const shopifyqlRefundReport = filters.includeRefundReport ? await summarizeShopifyqlRefunds(range, refundRows) : { rows: [] };
   const comparison = summarizeComparison(kpis, summarizeKpis(previousPeriodFacts), summarizeKpis(previousYearFacts));
   const analysis = await loadOrCreateAnalysis(range, filters, kpis, comparison, trend, skuRows, countryRows);
   const rankOffset = filters.rankOffset || 0;
@@ -130,7 +136,7 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
     accessoryAnalysis,
     discountRows,
     refundRows,
-    shopifyqlRefundRows: shopifyqlRefundReport.rows,
+    shopifyqlRefundRows: filters.includeRefundReport ? shopifyqlRefundReport.rows : [],
     shopifyqlRefundError: shopifyqlRefundReport.error,
     analysis,
     drilldowns: buildDrilldowns(facts),
@@ -273,14 +279,14 @@ function summarizeMachineAttach(items: Array<{ sku: string; quantity: number; sa
     .slice(0, 10);
 }
 
-function summarizeKpis(facts: FactOrder[]): Kpis {
+function summarizeKpis(facts: FactOrder[], overrideRefundAmount?: number, salesSummary?: ShopifyqlSalesSummary): Kpis {
   const accessorySalesFacts = facts.filter((row) => row.isAccessory && row.eventType === "sale");
   const visibleFacts = facts.filter((row) => !row.isAccessory);
   const salesFacts = visibleFacts.filter((row) => row.eventType === "sale");
   const refundFacts = visibleFacts.filter((row) => row.eventType === "refund" && row.refundAmount > 0);
   const quantity = sum(salesFacts, "quantity");
-  const salesAmount = sum(salesFacts, "salesAmount");
-  const refundAmount = sum(refundFacts, "refundAmount");
+  const salesAmount = salesSummary?.salesAmount || sum(salesFacts, "salesAmount");
+  const refundAmount = salesSummary?.refundAmount || overrideRefundAmount || sum(refundFacts, "refundAmount");
   const accessorySalesAmount = sum(accessorySalesFacts, "salesAmount");
   const orderCount = distinctCount(salesFacts, "orderId");
   const refundOrders = new Set(refundFacts.map((row) => row.orderId)).size;
@@ -289,7 +295,7 @@ function summarizeKpis(facts: FactOrder[]): Kpis {
     salesAmount,
     refundAmount,
     accessorySalesAmount,
-    netSalesAmount: salesAmount - refundAmount,
+    netSalesAmount: salesSummary?.netSalesAmount ?? salesAmount - refundAmount,
     orderCount,
     refundRate: ratio(refundAmount, salesAmount),
     refundOrderRate: ratio(refundOrders, orderCount),
@@ -297,6 +303,24 @@ function summarizeKpis(facts: FactOrder[]): Kpis {
     unitPrice: ratio(salesAmount, quantity),
     avgItemsPerOrder: ratio(quantity, orderCount),
   };
+}
+
+function applyShopifyqlRefundsToTrend(trend: TrendPoint[], rows: ShopifyqlRefundRow[]): TrendPoint[] {
+  if (!rows.length) return trend;
+  const returnsByDay = new Map<string, number>();
+  for (const [day, group] of groupBy(rows.filter((row) => row.day), (row) => row.day).entries()) {
+    returnsByDay.set(day, Math.abs(sum(group, "totalReturns")));
+  }
+  return trend.map((point) => {
+    const refundAmount = returnsByDay.get(point.date);
+    if (refundAmount == null) return point;
+    return {
+      ...point,
+      refundAmount,
+      netSalesAmount: point.salesAmount - refundAmount,
+      refundRate: ratio(refundAmount, point.salesAmount),
+    };
+  });
 }
 
 function summarizeTrend(facts: FactOrder[]): TrendPoint[] {
@@ -418,7 +442,7 @@ function refundStatusText(status?: string): string {
   return status || "已退款";
 }
 
-async function summarizeShopifyqlRefunds(range: { start: string; end: string }, fallbackRows: RefundDetailRow[]): Promise<{ rows: ShopifyqlRefundRow[]; error?: string }> {
+async function summarizeShopifyqlRefunds(range: { start: string; end: string }, fallbackRows: RefundDetailRow[]): Promise<ShopifyqlRefundReport> {
   const query = `
     FROM sales
       SHOW gross_returns, discounts_returned, net_returns, shipping_returned,
@@ -433,11 +457,11 @@ async function summarizeShopifyqlRefunds(range: { start: string; end: string }, 
   `;
   const response = await shopifyqlQuery(query);
   const apiError = response.errors?.map((error) => error.message).join("；");
-  if (apiError) return { rows: [], error: apiError };
+  if (apiError) return { rows: [], totalRefundAmount: 0, error: apiError };
 
   const report = response.data?.shopifyqlQuery;
   const parseError = report?.parseErrors?.filter(Boolean).join("；");
-  if (parseError) return { rows: [], error: parseError };
+  if (parseError) return { rows: [], totalRefundAmount: 0, error: parseError };
 
   const columns = report?.tableData?.columns?.map((column) => column.name || column.displayName || "") || [];
   const rawRows = report?.tableData?.rows || [];
@@ -466,7 +490,73 @@ async function summarizeShopifyqlRefunds(range: { start: string; end: string }, 
     })
     .filter((row) => row.orderName || row.totalReturns);
 
-  return { rows };
+  return { rows, totalRefundAmount: Math.abs(sum(rows, "totalReturns")) };
+}
+
+function summarizeShopifyqlRefundRows(rows: ShopifyqlRefundRow[], fallbackRows: RefundDetailRow[], allFacts: FactOrder[]): RefundDetailRow[] {
+  const fallbackByOrder = new Map(fallbackRows.map((row) => [row.orderId, row]));
+  const salesFactsByOrder = groupBy(allFacts.filter((row) => row.eventType === "sale"), (row) => row.orderId);
+  return [...groupBy(rows.filter((row) => row.orderName), (row) => row.orderName).entries()]
+    .map(([orderId, group]) => {
+      const totalReturns = Math.abs(sum(group, "totalReturns"));
+      if (totalReturns <= 0) return null;
+      const fallback = fallbackByOrder.get(orderId);
+      const orderLineItems = summarizeOrderLineItems(salesFactsByOrder.get(orderId) || []);
+      const productTitles = [...new Set(group.map((row) => row.productTitleAtTimeOfSale).filter(Boolean))];
+      return {
+        refundId: group.map((row) => row.saleId).filter(Boolean).join(", ") || `${orderId}-${group[0]?.day}`,
+        orderId,
+        orderDate: fallback?.orderDate || "",
+        refundDate: group.map((row) => row.day).filter(Boolean).sort().at(-1) || fallback?.refundDate || "",
+        refundStatus: fallback?.refundStatus || "已退款",
+        country: fallback?.country || group.find((row) => row.country && row.country !== "未返回")?.country || "未返回",
+        sku: orderLineItems.length ? orderLineItems.map((line) => `${line.sku} x ${line.quantity}`).join(", ") : fallback?.sku || productTitles.join(", "),
+        skus: orderLineItems.length ? orderLineItems.map((line) => line.sku) : fallback?.skus || productTitles,
+        lineItems: orderLineItems.length ? orderLineItems : fallback?.lineItems || [],
+        productTitle: productTitles.join(", ") || fallback?.productTitle || "",
+        refundReason: fallback?.refundReason || "ShopifyQL sales returns",
+        salesAmount: fallback?.salesAmount || sum(salesFactsByOrder.get(orderId) || [], "salesAmount"),
+        refundAmount: totalReturns,
+        refundQuantity: fallback?.refundQuantity || sum(orderLineItems, "quantity"),
+        customerEmail: fallback?.customerEmail || "未返回",
+      } satisfies RefundDetailRow;
+    })
+    .filter((row): row is RefundDetailRow => Boolean(row))
+    .sort((a, b) => b.refundDate.localeCompare(a.refundDate))
+    .slice(0, 120);
+}
+
+async function summarizeShopifyqlSalesSummary(range: { start: string; end: string }): Promise<ShopifyqlSalesSummary | undefined> {
+  const query = `
+    FROM sales
+      SHOW gross_sales, discounts, returns, net_sales, total_sales
+      SINCE ${range.start} UNTIL ${range.end}
+  `;
+  const response = await shopifyqlQuery(query);
+  const apiError = response.errors?.map((error) => error.message).join("；");
+  if (apiError) return { grossSalesAmount: 0, discountAmount: 0, salesAmount: 0, refundAmount: 0, netSalesAmount: 0, totalSalesAmount: 0, error: apiError };
+
+  const report = response.data?.shopifyqlQuery;
+  const parseError = report?.parseErrors?.filter(Boolean).join("；");
+  if (parseError) return { grossSalesAmount: 0, discountAmount: 0, salesAmount: 0, refundAmount: 0, netSalesAmount: 0, totalSalesAmount: 0, error: parseError };
+
+  const columns = report?.tableData?.columns?.map((column) => column.name || column.displayName || "") || [];
+  const row = report?.tableData?.rows?.[0];
+  if (!row) return undefined;
+
+  const grossSalesAmount = numberValue(tableValue(row, columns, "gross_sales"));
+  const discountAmount = Math.abs(numberValue(tableValue(row, columns, "discounts")));
+  const refundAmount = Math.abs(numberValue(tableValue(row, columns, "returns")));
+  const netSalesAmount = numberValue(tableValue(row, columns, "net_sales"));
+  const totalSalesAmount = numberValue(tableValue(row, columns, "total_sales"));
+  return {
+    grossSalesAmount,
+    discountAmount,
+    salesAmount: grossSalesAmount - discountAmount,
+    refundAmount,
+    netSalesAmount,
+    totalSalesAmount,
+  };
 }
 
 function tableValue(row: unknown, columns: string[], key: string): unknown {
