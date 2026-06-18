@@ -80,17 +80,21 @@ function filterFacts(facts: FactOrder[], filters: AnalyticsFilters, range: { sta
 }
 
 async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: FactOrder[], previousYearFacts: FactOrder[], allFacts: FactOrder[], filters: AnalyticsFilters, range: { start: string; end: string }, cached: boolean): Promise<AnalyticsResponse> {
+  const visibleFacts = facts.filter((row) => !row.isAccessory);
+  const visiblePreviousPeriodFacts = previousPeriodFacts.filter((row) => !row.isAccessory);
+  const visiblePreviousYearFacts = previousYearFacts.filter((row) => !row.isAccessory);
+  const visibleAllFacts = allFacts.filter((row) => !row.isAccessory);
   const kpis = summarizeKpis(facts);
-  const trend = summarizeTrend(facts);
-  const previousPeriodTrend = summarizeTrend(previousPeriodFacts);
-  const previousYearTrend = summarizeTrend(previousYearFacts);
-  const skuRows = summarizeSku(facts);
-  const countryRows = summarizeCountry(facts);
-  const recentOrders = summarizeRecentOrders(facts);
-  const customerRows = summarizeCustomers(facts);
-  const accessoryAnalysis = summarizeAccessoryAnalysis(facts, allFacts);
-  const discountRows = summarizeDiscounts(facts);
-  const refundRows = summarizeRefunds(facts, allFacts);
+  const trend = summarizeTrend(visibleFacts);
+  const previousPeriodTrend = summarizeTrend(visiblePreviousPeriodFacts);
+  const previousYearTrend = summarizeTrend(visiblePreviousYearFacts);
+  const skuRows = summarizeSku(visibleFacts);
+  const countryRows = summarizeCountry(visibleFacts);
+  const recentOrders = summarizeRecentOrders(visibleFacts);
+  const customerRows = summarizeCustomers(visibleFacts);
+  const accessoryAnalysis = summarizeAccessoryAnalysis(visibleFacts, visibleAllFacts);
+  const discountRows = summarizeDiscounts(visibleFacts);
+  const refundRows = summarizeRefunds(visibleFacts, visibleAllFacts);
   const shopifyqlRefundReport = filters.includeRefundReport ? await summarizeShopifyqlRefunds(range, refundRows) : { rows: [] };
   const comparison = summarizeComparison(kpis, summarizeKpis(previousPeriodFacts), summarizeKpis(previousYearFacts));
   const analysis = await loadOrCreateAnalysis(range, filters, kpis, comparison, trend, skuRows, countryRows);
@@ -270,17 +274,21 @@ function summarizeMachineAttach(items: Array<{ sku: string; quantity: number; sa
 }
 
 function summarizeKpis(facts: FactOrder[]): Kpis {
-  const salesFacts = facts.filter((row) => row.eventType === "sale");
-  const refundFacts = facts.filter((row) => row.eventType === "refund" && row.refundAmount > 0);
+  const accessorySalesFacts = facts.filter((row) => row.isAccessory && row.eventType === "sale");
+  const visibleFacts = facts.filter((row) => !row.isAccessory);
+  const salesFacts = visibleFacts.filter((row) => row.eventType === "sale");
+  const refundFacts = visibleFacts.filter((row) => row.eventType === "refund" && row.refundAmount > 0);
   const quantity = sum(salesFacts, "quantity");
   const salesAmount = sum(salesFacts, "salesAmount");
   const refundAmount = sum(refundFacts, "refundAmount");
+  const accessorySalesAmount = sum(accessorySalesFacts, "salesAmount");
   const orderCount = distinctCount(salesFacts, "orderId");
   const refundOrders = new Set(refundFacts.map((row) => row.orderId)).size;
   return {
     quantity,
     salesAmount,
     refundAmount,
+    accessorySalesAmount,
     netSalesAmount: salesAmount - refundAmount,
     orderCount,
     refundRate: ratio(refundAmount, salesAmount),

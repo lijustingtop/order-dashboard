@@ -306,11 +306,11 @@ export default function DashboardClient() {
 
 function KpiStrip({ data }: { data: AnalyticsResponse | null }) {
   const items = [
-    { title: "销售额", value: formatMoney(data?.kpis.netSalesAmount ?? 0), meta: "已扣退款 / Accessories", mom: data?.comparison.mom.netSalesAmount, yoy: data?.comparison.yoy.netSalesAmount },
+    { title: "销售额", value: formatMoney(data?.kpis.netSalesAmount ?? 0), meta: `Accessories ${formatMoney(data?.kpis.accessorySalesAmount ?? 0)}`, mom: data?.comparison.mom.netSalesAmount, yoy: data?.comparison.yoy.netSalesAmount },
     { title: "销量", value: formatNumber(data?.kpis.quantity ?? 0), meta: "Units sold", mom: data?.comparison.mom.quantity, yoy: data?.comparison.yoy.quantity },
     { title: "订单数", value: formatNumber(data?.kpis.orderCount ?? 0), meta: "Orders", mom: data?.comparison.mom.orderCount, yoy: data?.comparison.yoy.orderCount },
     { title: "客单价", value: formatMoney(data?.kpis.aov ?? 0), meta: "AOV", mom: data?.comparison.mom.aov, yoy: data?.comparison.yoy.aov },
-    { title: "退款率", value: formatPercent(data?.kpis.refundRate ?? 0), meta: formatMoney(data?.kpis.refundAmount ?? 0), mom: data?.comparison.mom.refundRate, yoy: data?.comparison.yoy.refundRate, danger: true },
+    { title: "退款率", value: `${formatMoney(data?.kpis.refundAmount ?? 0)} / ${formatPercent(data?.kpis.refundRate ?? 0)}`, meta: "退款金额 / 退款率", mom: data?.comparison.mom.refundRate, yoy: data?.comparison.yoy.refundRate, danger: true },
   ];
   return (
     <div className="kpi-strip">

@@ -10,9 +10,11 @@ export type FactOrder = {
   country: string;
   sku: string;
   productTitle: string;
+  isAccessory?: boolean;
   quantity: number;
   salesAmount: number;
   refundAmount: number;
+  accessorySalesAmount?: number;
   refundDate?: string;
   refundId?: string;
   refundStatus?: "REFUNDED" | "PARTIALLY_REFUNDED" | string;
@@ -71,6 +73,7 @@ export type Kpis = {
   quantity: number;
   salesAmount: number;
   refundAmount: number;
+  accessorySalesAmount: number;
   netSalesAmount: number;
   orderCount: number;
   refundRate: number;

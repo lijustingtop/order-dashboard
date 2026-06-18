@@ -151,16 +151,18 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
 
   const facts: FactOrder[] = [];
   for (const order of orders.values()) {
-    const items = (lineItems.get(order.id) || []).filter((item) => !isAccessory(item));
-    if (!items.length) continue;
-    const orderSales = items.reduce((total, item) => total + moneyAmount(item.discountedTotalSet?.shopMoney?.amount), 0);
+    const allItems = lineItems.get(order.id) || [];
+    const items = allItems.filter((item) => !isAccessory(item));
+    if (!allItems.length) continue;
+    const orderSales = allItems.reduce((total, item) => total + moneyAmount(item.discountedTotalSet?.shopMoney?.amount), 0);
     const orderDiscount = moneyAmount(order.totalDiscountsSet?.shopMoney?.amount);
     const discountCodes = discountCodesFromOrder(order);
     const orderDate = order.createdAt ? formatDateInAnalyticsTimeZone(new Date(order.createdAt)) : "";
     const customerName = order.customer?.displayName || order.name || "未知客户";
     const customerEmail = order.customer?.email || order.email || "";
     const country = countryName(order.shippingAddress?.countryCodeV2);
-    for (const item of items) {
+    for (const item of allItems) {
+      const accessory = isAccessory(item);
       const lineAmount = moneyAmount(item.discountedTotalSet?.shopMoney?.amount);
       const cleanedSku = normalizeSku(item.sku || item.title || "UNKNOWN");
       const productTitle = normalizeProductTitle(item.title || cleanedSku);
@@ -179,12 +181,14 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
         quantity: Number(item.quantity || 0),
         salesAmount,
         refundAmount: 0,
+        accessorySalesAmount: accessory ? salesAmount : 0,
         discountAmount,
         discountCodes,
         currency: item.discountedTotalSet?.shopMoney?.currencyCode || order.currencyCode || "USD",
         customerName,
         customerEmail,
         model: modelFromSku(cleanedSku, productTitle),
+        isAccessory: accessory,
       });
     }
 
