@@ -161,11 +161,13 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
     const customerEmail = order.customer?.email || order.email || "";
     const country = countryName(order.shippingAddress?.countryCodeV2);
     for (const item of items) {
-      const salesAmount = moneyAmount(item.discountedTotalSet?.shopMoney?.amount);
+      const lineAmount = moneyAmount(item.discountedTotalSet?.shopMoney?.amount);
       const cleanedSku = normalizeSku(item.sku || item.title || "UNKNOWN");
       const productTitle = normalizeProductTitle(item.title || cleanedSku);
       if (cleanedSku === "UNKNOWN" && productTitle === "UNKNOWN") continue;
-      const salesShare = orderSales > 0 ? salesAmount / orderSales : 1 / items.length;
+      const salesShare = orderSales > 0 ? lineAmount / orderSales : 1 / items.length;
+      const discountAmount = orderDiscount * salesShare;
+      const salesAmount = Math.max(0, lineAmount - discountAmount);
       facts.push({
         orderId: order.name || order.id,
         date: orderDate,
@@ -177,7 +179,7 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
         quantity: Number(item.quantity || 0),
         salesAmount,
         refundAmount: 0,
-        discountAmount: orderDiscount * salesShare,
+        discountAmount,
         discountCodes,
         currency: item.discountedTotalSet?.shopMoney?.currencyCode || order.currencyCode || "USD",
         customerName,
@@ -203,6 +205,9 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
           if (cleanedSku === "UNKNOWN" && productTitle === "UNKNOWN") continue;
           const lineRefundAmount = moneyAmount(line.subtotalSet?.shopMoney?.amount) + moneyAmount(line.totalTaxSet?.shopMoney?.amount);
           const refundShare = lineSubtotal > 0 ? moneyAmount(line.subtotalSet?.shopMoney?.amount) / lineSubtotal : 1 / usableRefundLineItems.length;
+          const lineSalesAmount = moneyAmount(line.lineItem?.discountedTotalSet?.shopMoney?.amount);
+          const lineSalesShare = orderSales > 0 ? lineSalesAmount / orderSales : refundShare;
+          const salesAmount = Math.max(0, lineSalesAmount - orderDiscount * lineSalesShare);
           facts.push({
             orderId: order.name || order.id,
             date: formattedRefundDate || orderDate,
@@ -212,7 +217,7 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
             sku: cleanedSku,
             productTitle,
             quantity: 0,
-            salesAmount: moneyAmount(line.lineItem?.discountedTotalSet?.shopMoney?.amount),
+            salesAmount,
             refundAmount: lineRefundAmount || refundAmount * refundShare,
             refundDate: formattedRefundDate,
             refundId: refund.id || `${order.id}-${formattedRefundDate}`,
@@ -229,11 +234,12 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
       }
 
       for (const item of items) {
-        const salesAmount = moneyAmount(item.discountedTotalSet?.shopMoney?.amount);
+        const lineAmount = moneyAmount(item.discountedTotalSet?.shopMoney?.amount);
         const cleanedSku = normalizeSku(item.sku || item.title || "UNKNOWN");
         const productTitle = normalizeProductTitle(item.title || cleanedSku);
         if (cleanedSku === "UNKNOWN" && productTitle === "UNKNOWN") continue;
-        const refundShare = orderSales > 0 ? salesAmount / orderSales : 1 / items.length;
+        const refundShare = orderSales > 0 ? lineAmount / orderSales : 1 / items.length;
+        const salesAmount = Math.max(0, lineAmount - orderDiscount * refundShare);
         facts.push({
           orderId: order.name || order.id,
           date: formattedRefundDate || orderDate,
