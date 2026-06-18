@@ -1,4 +1,4 @@
-import { formatDate } from "@/lib/date";
+import { formatDateInAnalyticsTimeZone } from "@/lib/date";
 import { currentBulkOperation, startOrdersBulkOperation } from "@/lib/shopify";
 import type { FactOrder } from "@/types/analytics";
 
@@ -156,7 +156,7 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
     const orderSales = items.reduce((total, item) => total + moneyAmount(item.discountedTotalSet?.shopMoney?.amount), 0);
     const orderDiscount = moneyAmount(order.totalDiscountsSet?.shopMoney?.amount);
     const discountCodes = discountCodesFromOrder(order);
-    const orderDate = order.createdAt ? formatDate(new Date(order.createdAt)) : "";
+    const orderDate = order.createdAt ? formatDateInAnalyticsTimeZone(new Date(order.createdAt)) : "";
     const customerName = order.customer?.displayName || order.name || "未知客户";
     const customerEmail = order.customer?.email || order.email || "";
     const country = countryName(order.shippingAddress?.countryCodeV2);
@@ -191,7 +191,7 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
       const refundAmount = moneyAmount(refund.totalRefundedSet?.shopMoney?.amount);
       if (!refundableStatus && refundAmount <= 0) continue;
       const refundDate = refund.createdAt;
-      const formattedRefundDate = refundDate ? formatDate(new Date(refundDate)) : "";
+      const formattedRefundDate = refundDate ? formatDateInAnalyticsTimeZone(new Date(refundDate)) : "";
       const refundLineItems = refund.refundLineItems?.edges?.map((edge) => edge.node).filter((node): node is ShopifyRefundLineItemNode => Boolean(node)) || [];
       const usableRefundLineItems = refundLineItems.filter((line) => !isAccessory({ sku: line.lineItem?.sku, title: line.lineItem?.title }));
 

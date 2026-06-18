@@ -1,9 +1,21 @@
 import type { DatePreset } from "@/types/analytics";
 
 const DAY_MS = 86_400_000;
+const ANALYTICS_TIME_ZONE = process.env.ANALYTICS_TIME_ZONE || "Asia/Shanghai";
 
 export function formatDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+export function formatDateInAnalyticsTimeZone(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: ANALYTICS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 export function formatChineseDate(value: string): string {
