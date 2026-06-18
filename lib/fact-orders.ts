@@ -248,7 +248,7 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
           refundDate: formattedRefundDate,
           refundId: refund.id || `${order.id}-${formattedRefundDate}`,
           refundStatus: order.displayFinancialStatus,
-          refundLineQuantity: 0,
+          refundLineQuantity: Number(item.quantity || 0),
           currency: item.discountedTotalSet?.shopMoney?.currencyCode || order.currencyCode || "USD",
           customerName,
           customerEmail,
