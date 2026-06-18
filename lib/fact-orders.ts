@@ -205,7 +205,7 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
           const refundShare = lineSubtotal > 0 ? moneyAmount(line.subtotalSet?.shopMoney?.amount) / lineSubtotal : 1 / usableRefundLineItems.length;
           facts.push({
             orderId: order.name || order.id,
-            date: orderDate,
+            date: formattedRefundDate || orderDate,
             orderDate,
             eventType: "refund",
             country,
@@ -236,7 +236,7 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
         const refundShare = orderSales > 0 ? salesAmount / orderSales : 1 / items.length;
         facts.push({
           orderId: order.name || order.id,
-          date: orderDate,
+          date: formattedRefundDate || orderDate,
           orderDate,
           eventType: "refund",
           country,
