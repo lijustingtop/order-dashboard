@@ -237,12 +237,13 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
         continue;
       }
 
-      for (const item of items) {
+      for (const item of allItems) {
+        const accessory = isAccessory(item);
         const lineAmount = moneyAmount(item.discountedTotalSet?.shopMoney?.amount);
         const cleanedSku = normalizeSku(item.sku || item.title || "UNKNOWN");
         const productTitle = normalizeProductTitle(item.title || cleanedSku);
         if (cleanedSku === "UNKNOWN" && productTitle === "UNKNOWN") continue;
-        const refundShare = orderSales > 0 ? lineAmount / orderSales : 1 / items.length;
+        const refundShare = orderSales > 0 ? lineAmount / orderSales : 1 / allItems.length;
         const salesAmount = Math.max(0, lineAmount - orderDiscount * refundShare);
         facts.push({
           orderId: order.name || order.id,
@@ -255,6 +256,7 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
           quantity: 0,
           salesAmount,
           refundAmount: refundAmount * refundShare,
+          accessorySalesAmount: accessory ? salesAmount : 0,
           refundDate: formattedRefundDate,
           refundId: refund.id || `${order.id}-${formattedRefundDate}`,
           refundStatus: order.displayFinancialStatus,
@@ -263,6 +265,7 @@ async function loadFactsFromBulkUrl(url: string): Promise<FactOrder[]> {
           customerName,
           customerEmail,
           model: modelFromSku(cleanedSku, productTitle),
+          isAccessory: accessory,
           refundReason: refund.note || "未填写",
         });
       }

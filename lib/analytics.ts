@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { dateDimension, formatChineseDate, inRange, parseDate, previousRange, previousYearRange, resolveDateRange, weekOption } from "@/lib/date";
-import { loadFactOrders } from "@/lib/fact-orders";
+import { dateDimension, formatChineseDate, formatDateInAnalyticsTimeZone, inRange, parseDate, previousRange, previousYearRange, resolveDateRange, weekOption } from "@/lib/date";
+import { loadFactOrders, normalizeSku } from "@/lib/fact-orders";
 import { niceScale } from "@/lib/nice-scale";
 import { shopifyqlQuery } from "@/lib/shopify";
 import type {
@@ -86,12 +86,12 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
   const visiblePreviousPeriodFacts = previousPeriodFacts.filter((row) => !row.isAccessory);
   const visiblePreviousYearFacts = previousYearFacts.filter((row) => !row.isAccessory);
   const visibleAllFacts = allFacts.filter((row) => !row.isAccessory);
-  const fallbackRefundRows = summarizeRefunds(visibleFacts, visibleAllFacts);
+  const fallbackRefundRows = summarizeRefunds(facts, allFacts);
   const [shopifyqlRefundReport, shopifyqlSalesSummary] = await Promise.all([
     summarizeShopifyqlRefunds(range, fallbackRefundRows),
     summarizeShopifyqlSalesSummary(range),
   ]);
-  const refundRows = shopifyqlRefundReport.rows.length ? summarizeShopifyqlRefundRows(shopifyqlRefundReport.rows, fallbackRefundRows, visibleAllFacts) : fallbackRefundRows;
+  const refundRows = shopifyqlRefundReport.rows.length ? await summarizeShopifyqlRefundRows(shopifyqlRefundReport.rows, fallbackRefundRows, allFacts) : fallbackRefundRows;
   const kpis = summarizeKpis(facts, shopifyqlRefundReport.totalRefundAmount || undefined, shopifyqlSalesSummary);
   const trend = applyShopifyqlRefundsToTrend(summarizeTrend(visibleFacts), shopifyqlRefundReport.rows);
   const previousPeriodTrend = summarizeTrend(visiblePreviousPeriodFacts);
@@ -455,7 +455,9 @@ async function summarizeShopifyqlRefunds(range: { start: string; end: string }, 
       LIMIT 1000
     VISUALIZE total_returns TYPE table
   `;
-  const response = await shopifyqlQuery(query);
+  const response: Awaited<ReturnType<typeof shopifyqlQuery>> = await shopifyqlQuery(query).catch((error) => ({
+    errors: [{ message: error instanceof Error ? error.message : "ShopifyQL request failed" }],
+  }));
   const apiError = response.errors?.map((error) => error.message).join("；");
   if (apiError) return { rows: [], totalRefundAmount: 0, error: apiError };
 
@@ -493,8 +495,11 @@ async function summarizeShopifyqlRefunds(range: { start: string; end: string }, 
   return { rows, totalRefundAmount: Math.abs(sum(rows, "totalReturns")) };
 }
 
-function summarizeShopifyqlRefundRows(rows: ShopifyqlRefundRow[], fallbackRows: RefundDetailRow[], allFacts: FactOrder[]): RefundDetailRow[] {
+async function summarizeShopifyqlRefundRows(rows: ShopifyqlRefundRow[], fallbackRows: RefundDetailRow[], allFacts: FactOrder[]): Promise<RefundDetailRow[]> {
   const fallbackByOrder = new Map(fallbackRows.map((row) => [row.orderId, row]));
+  const missingOrderIds = [...new Set(rows.map((row) => row.orderName).filter((orderName) => orderName && !fallbackByOrder.has(orderName)))];
+  const directFallbacks = await fetchRefundFallbackOrders(missingOrderIds);
+  for (const [orderId, row] of directFallbacks.entries()) fallbackByOrder.set(orderId, row);
   const salesFactsByOrder = groupBy(allFacts.filter((row) => row.eventType === "sale"), (row) => row.orderId);
   return [...groupBy(rows.filter((row) => row.orderName), (row) => row.orderName).entries()]
     .map(([orderId, group]) => {
@@ -526,13 +531,132 @@ function summarizeShopifyqlRefundRows(rows: ShopifyqlRefundRow[], fallbackRows: 
     .slice(0, 120);
 }
 
+async function fetchRefundFallbackOrders(orderIds: string[]): Promise<Map<string, RefundDetailRow>> {
+  const result = new Map<string, RefundDetailRow>();
+  const shop = process.env.SHOPIFY_SHOP_DOMAIN;
+  const token = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
+  const version = process.env.SHOPIFY_API_VERSION || "2026-07";
+  if (!shop || !token || !orderIds.length) return result;
+
+  const query = `
+    query RefundFallback($q: String!) {
+      orders(first: 1, query: $q) {
+        edges {
+          node {
+            name
+            createdAt
+            displayFinancialStatus
+            totalRefundedSet { shopMoney { amount currencyCode } }
+            shippingAddress { countryCodeV2 country }
+            customer { email displayName }
+            email
+            lineItems(first: 50) {
+              edges {
+                node {
+                  sku
+                  title
+                  quantity
+                  discountedTotalSet { shopMoney { amount currencyCode } }
+                }
+              }
+            }
+            refunds(first: 20) {
+              id
+              createdAt
+              note
+              totalRefundedSet { shopMoney { amount currencyCode } }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  for (const orderId of orderIds.slice(0, 50)) {
+    try {
+      const response = await fetch(`https://${shop}/admin/api/${version}/graphql.json`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": token,
+        },
+        body: JSON.stringify({ query, variables: { q: `name:${orderId}` } }),
+        cache: "no-store",
+      });
+      if (!response.ok) continue;
+      const json = await response.json() as {
+        data?: {
+          orders?: {
+            edges?: Array<{
+              node?: {
+                name?: string;
+                createdAt?: string;
+                displayFinancialStatus?: string;
+                shippingAddress?: { countryCodeV2?: string; country?: string };
+                customer?: { email?: string; displayName?: string };
+                email?: string;
+                lineItems?: { edges?: Array<{ node?: { sku?: string; title?: string; quantity?: number; discountedTotalSet?: { shopMoney?: { amount?: string } } } }> };
+                refunds?: Array<{ id?: string; createdAt?: string; note?: string; totalRefundedSet?: { shopMoney?: { amount?: string } } }>;
+              };
+            }>;
+          };
+        };
+      };
+      const order = json.data?.orders?.edges?.[0]?.node;
+      if (!order?.name) continue;
+      const lineItems = (order.lineItems?.edges || [])
+        .map((edge) => edge.node)
+        .filter((node): node is { sku?: string; title?: string; quantity?: number; discountedTotalSet?: { shopMoney?: { amount?: string } } } => Boolean(node));
+      const refunds = order.refunds || [];
+      const refundDates = refunds.map((refund) => refund.createdAt ? formatDateInAnalyticsTimeZone(new Date(refund.createdAt)) : "").filter(Boolean).sort();
+      const lineRows = lineItems.map((item) => ({
+        sku: normalizeSku(item.sku || item.title || "UNKNOWN"),
+        quantity: Number(item.quantity || 0),
+      })).filter((item) => item.sku && item.quantity > 0);
+      const productTitles = [...new Set(lineItems.map((item) => item.title || item.sku || "").filter(Boolean))];
+      result.set(order.name, {
+        refundId: refunds.map((refund) => refund.id).filter(Boolean).join(", ") || order.name,
+        orderId: order.name,
+        orderDate: order.createdAt ? formatDateInAnalyticsTimeZone(new Date(order.createdAt)) : "",
+        refundDate: refundDates.at(-1) || "",
+        refundStatus: refundStatusText(order.displayFinancialStatus),
+        country: countryNameFromCode(order.shippingAddress?.countryCodeV2, order.shippingAddress?.country),
+        sku: lineRows.map((line) => `${line.sku} x ${line.quantity}`).join(", "),
+        skus: lineRows.map((line) => line.sku),
+        lineItems: lineRows,
+        productTitle: productTitles.join(", "),
+        refundReason: [...new Set(refunds.map((refund) => refund.note || "未填写"))].join(", "),
+        salesAmount: sum(lineItems.map((item) => ({ amount: numberValue(item.discountedTotalSet?.shopMoney?.amount) })), "amount"),
+        refundAmount: sum(refunds.map((refund) => ({ amount: numberValue(refund.totalRefundedSet?.shopMoney?.amount) })), "amount"),
+        refundQuantity: sum(lineRows, "quantity"),
+        customerEmail: order.customer?.email || order.email || "未提供",
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  return result;
+}
+
+function countryNameFromCode(code?: string, fallback?: string): string {
+  if (!code) return fallback || "未知";
+  try {
+    return new Intl.DisplayNames(["zh-CN"], { type: "region" }).of(code) || fallback || code;
+  } catch {
+    return fallback || code;
+  }
+}
+
 async function summarizeShopifyqlSalesSummary(range: { start: string; end: string }): Promise<ShopifyqlSalesSummary | undefined> {
   const query = `
     FROM sales
       SHOW gross_sales, discounts, returns, net_sales, total_sales
       SINCE ${range.start} UNTIL ${range.end}
   `;
-  const response = await shopifyqlQuery(query);
+  const response: Awaited<ReturnType<typeof shopifyqlQuery>> = await shopifyqlQuery(query).catch((error) => ({
+    errors: [{ message: error instanceof Error ? error.message : "ShopifyQL request failed" }],
+  }));
   const apiError = response.errors?.map((error) => error.message).join("；");
   if (apiError) return { grossSalesAmount: 0, discountAmount: 0, salesAmount: 0, refundAmount: 0, netSalesAmount: 0, totalSalesAmount: 0, error: apiError };
 
