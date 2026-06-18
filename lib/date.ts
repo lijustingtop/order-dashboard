@@ -1,7 +1,7 @@
 import type { DatePreset } from "@/types/analytics";
 
 const DAY_MS = 86_400_000;
-const ANALYTICS_TIME_ZONE = process.env.ANALYTICS_TIME_ZONE || "Asia/Shanghai";
+const ANALYTICS_TIME_ZONE = process.env.ANALYTICS_TIME_ZONE || "America/New_York";
 
 export function formatDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
