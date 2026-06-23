@@ -7,16 +7,12 @@ import type { AnalyticsResponse, ChartMode, DatePreset, TrendMetric, TrendPoint 
 const ReactECharts = dynamic(() => import("echarts-for-react"), { ssr: false });
 
 const dateOptions: Array<{ value: DatePreset; label: string }> = [
-  { value: "week", label: "本周（周四-周三）" },
   { value: "today", label: "今天" },
-  { value: "yesterday", label: "昨天" },
-  { value: "last7", label: "最近7天" },
-  { value: "last30", label: "最近30天" },
-  { value: "month", label: "本月" },
+  { value: "last7", label: "前7天" },
+  { value: "last30", label: "前30天" },
   { value: "lastMonth", label: "上月" },
-  { value: "quarter", label: "本季" },
   { value: "year", label: "今年" },
-  { value: "custom", label: "自定义" },
+  { value: "all", label: "全部数据" },
 ];
 
 const navItems = [
@@ -39,7 +35,7 @@ type RankDisplayRow = { key: string; label: string; value: string; share: number
 
 export default function DashboardClient() {
   const [activeView, setActiveView] = useState<ViewKey>("overview");
-  const [preset, setPreset] = useState<DatePreset>("week");
+  const [preset, setPreset] = useState<DatePreset>("last7");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [countries, setCountries] = useState<string[]>([]);
@@ -73,10 +69,12 @@ export default function DashboardClient() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    fetch(`/api/analytics?${query.toString()}`, { cache: "no-store" })
-      .then((response) => response.json())
+    requestJson<AnalyticsResponse>(`/api/analytics?${query.toString()}`)
       .then((payload: AnalyticsResponse) => {
         if (active) setData(payload);
+      })
+      .catch(() => {
+        if (active) setData(null);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -90,6 +88,7 @@ export default function DashboardClient() {
   const modelOptions = data?.dimensions.products ?? [];
   const selectedCountry = countries[0] || "";
   const selectedModel = models[0] || "";
+  const selectedProduct = modelOptions.find((item) => item.sku === selectedModel);
   const shareRows = buildShareRows(data, shareGroup, shareValue);
   const effectiveRankTarget = resolveRankTarget(activeView, selectedCountry, selectedModel, rankTarget);
   const rankRows = buildRankRows(data, effectiveRankTarget, rankMetric);
@@ -97,9 +96,8 @@ export default function DashboardClient() {
   const countryQuantityRows = buildRankRows(data, "country", "quantity");
   const modelSalesRows = buildRankRows(data, "model", "sales");
   const modelQuantityRows = buildRankRows(data, "model", "quantity");
-  const weekOptions = data?.dimensions.weeks ?? [];
   const selectedAccessoryAnalysis = buildSelectedAccessoryAnalysis(data, selectedModel);
-  const viewTitle = selectedCountry && activeView === "countries" ? `${selectedCountry} Overview` : selectedModel && activeView === "products" ? `${selectedModel} Overview` : activeView === "orders" ? "订单明细" : activeView === "customers" ? "客户排行" : activeView === "refunds" ? "退款分析" : activeView === "discounts" ? "优惠券明细" : "Overview";
+  const viewTitle = selectedCountry && activeView === "countries" ? `${selectedCountry} Overview` : selectedModel && activeView === "products" ? `${selectedModel} Overview` : activeView === "countries" ? "国家分析" : activeView === "products" ? "型号分析" : activeView === "orders" ? "订单明细" : activeView === "customers" ? "客户排行" : activeView === "refunds" ? "退款分析" : activeView === "discounts" ? "优惠券明细" : "Overview";
 
   return (
     <main className="apple-shell">
@@ -133,6 +131,8 @@ export default function DashboardClient() {
         <header className="topbar">
           <div>
             <p className="eyebrow">Shopify Analytics</p>
+            <p className="metric-rule">统计口径：销售额按 Shopify Sales，退款按 Returns，优惠券仅统计有优惠码的折扣</p>
+            {selectedModel && selectedProduct?.launchDate ? <p className="launch-date">上线日期：{selectedProduct.launchDate}</p> : null}
             <h1>{viewTitle}</h1>
           </div>
           <div className="last-updated">Last updated: {data ? new Date(data.generatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "--"}</div>
@@ -142,22 +142,6 @@ export default function DashboardClient() {
           <select className="apple-field" value={preset} onChange={(event) => setPreset(event.target.value as DatePreset)}>
             {dateOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-          <select className="apple-field" value={preset === "custom" && start && end ? `${start}__${end}` : ""} onChange={(event) => {
-            const option = weekOptions.find((item) => item.key === event.target.value);
-            if (!option) return;
-            setPreset("custom");
-            setStart(option.start);
-            setEnd(option.end);
-          }}>
-            <option value="">周区间快捷选择</option>
-            {weekOptions.map((week) => <option key={week.key} value={week.key}>{week.label}</option>)}
-          </select>
-          {preset === "custom" ? (
-            <>
-              <input className="apple-field" type="date" value={start} onChange={(event) => setStart(event.target.value)} />
-              <input className="apple-field" type="date" value={end} onChange={(event) => setEnd(event.target.value)} />
-            </>
-          ) : null}
           <select className="apple-field" value={selectedCountry} onChange={(event) => {
             setCountries(event.target.value ? [event.target.value] : []);
             if (activeView === "countries") setModels([]);
@@ -204,7 +188,8 @@ export default function DashboardClient() {
 
         {activeView !== "orders" && activeView !== "customers" && activeView !== "refunds" && activeView !== "discounts" ? (
           <>
-            <section className={activeView === "overview" ? "hero-grid chart-only" : "hero-grid"}>
+                {(activeView === "countries" || activeView === "products") ? <InsightPanel view={activeView} data={data} selectedCountry={selectedCountry} selectedModel={selectedModel} /> : null}
+                <section className={activeView === "overview" ? "hero-grid chart-only" : "hero-grid"}>
               <div className="glass-card chart-card">
                 <div className="card-title-row">
                   <div>
@@ -304,6 +289,33 @@ export default function DashboardClient() {
   );
 }
 
+function requestJson<T>(url: string): Promise<T> {
+  if (typeof window !== "undefined" && typeof window.fetch === "function") {
+    return window.fetch(url, { cache: "no-store" }).then((response) => {
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      return response.json() as Promise<T>;
+    });
+  }
+  return new Promise<T>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("GET", url, true);
+    request.setRequestHeader("Accept", "application/json");
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        try {
+          resolve(JSON.parse(request.responseText) as T);
+        } catch (error) {
+          reject(error);
+        }
+      } else {
+        reject(new Error(`Request failed: ${request.status}`));
+      }
+    };
+    request.onerror = () => reject(new Error("Request failed"));
+    request.send();
+  });
+}
+
 function KpiStrip({ data }: { data: AnalyticsResponse | null }) {
   const items = [
     { title: "销售额", value: formatMoney(data?.kpis.netSalesAmount ?? 0), meta: `Accessories ${formatMoney(data?.kpis.accessorySalesAmount ?? 0)}`, mom: data?.comparison.mom.netSalesAmount, yoy: data?.comparison.yoy.netSalesAmount },
@@ -326,6 +338,24 @@ function KpiStrip({ data }: { data: AnalyticsResponse | null }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function InsightPanel({ view, data, selectedCountry, selectedModel }: { view: ViewKey; data: AnalyticsResponse | null; selectedCountry: string; selectedModel: string }) {
+  const lines = buildInsightLines(view, data, selectedCountry, selectedModel);
+  if (!lines.length) return null;
+  return (
+    <section className="glass-card analysis-card">
+      <div className="card-title-row">
+        <div>
+          <h2>{view === "countries" ? "国家分析" : "型号分析"}</h2>
+          <p>基于当前筛选时间段自动生成</p>
+        </div>
+      </div>
+      <div className="analysis-summary">
+        {lines.map((line) => <p key={line}>{line}</p>)}
+      </div>
+    </section>
   );
 }
 
@@ -512,6 +542,45 @@ function buildSelectedAccessoryAnalysis(data: AnalyticsResponse | null, selected
     if (row.key === "ex-pcie5") return selected.includes("bl/ex/深空灰色/pcie5");
     return false;
   });
+}
+
+function buildInsightLines(view: ViewKey, data: AnalyticsResponse | null, selectedCountry: string, selectedModel: string) {
+  if (!data) return [];
+  if (view === "countries") {
+    if (selectedCountry) {
+      const country = data.countryRows.find((row) => row.country === selectedCountry);
+      const topModels = (data.drilldowns.countryModels[selectedCountry] || []).slice(0, 3);
+      if (!country) return [`${selectedCountry} 在当前时间段暂无可分析销售数据。`];
+      return [
+        `${selectedCountry} 当前净销售额 ${formatMoney(country.netSalesAmount)}，销量 ${formatNumber(country.quantity)} 件，订单数 ${formatNumber(country.orderCount)} 单，退款率 ${formatPercent(country.refundRate)}。`,
+        topModels.length ? `主要贡献型号为 ${topModels.map((row) => `${row.label}（${formatMoney(row.salesAmount)}）`).join("、")}。` : "当前国家没有可展开的型号排行。",
+        country.refundRate > 0.08 ? "退款率偏高，建议优先查看退款原因、物流状态与该国家主销型号库存。" : "退款率处于相对可控区间，可继续观察主销型号的库存和转化变化。",
+      ];
+    }
+    const topCountries = data.countryRows.slice(0, 3);
+    return topCountries.length ? [
+      `当前未选国家，销售额前三国家为 ${topCountries.map((row) => `${row.country}（${formatMoney(row.salesAmount)}）`).join("、")}。`,
+      `国家维度总销量 ${formatNumber(data.kpis.quantity)} 件，订单数 ${formatNumber(data.kpis.orderCount)} 单，整体退款率 ${formatPercent(data.kpis.refundRate)}。`,
+    ] : [];
+  }
+
+  if (selectedModel) {
+    const model = data.skuRows.find((row) => row.sku === selectedModel);
+    const topCountries = (data.drilldowns.modelCountries[selectedModel] || []).slice(0, 3);
+    const launchDate = data.dimensions.products.find((row) => row.sku === selectedModel)?.launchDate;
+    if (!model) return [`${selectedModel} 在当前时间段暂无可分析销售数据。`];
+    return [
+      `${selectedModel}${launchDate ? `（上线日期 ${launchDate}）` : ""} 当前净销售额 ${formatMoney(model.netSalesAmount)}，销量 ${formatNumber(model.quantity)} 件，订单数 ${formatNumber(model.orderCount)} 单。`,
+      topCountries.length ? `主要售卖国家为 ${topCountries.map((row) => `${row.label}（${formatMoney(row.salesAmount)}）`).join("、")}。` : "当前型号没有可展开的国家排行。",
+      model.refundRate > 0.08 ? "该型号退款率偏高，建议结合退款原因、评价反馈和适配规格排查。" : "该型号退款率暂处于可控区间，可继续关注国家分布和客单变化。",
+    ];
+  }
+
+  const topModels = data.skuRows.slice(0, 3);
+  return topModels.length ? [
+    `当前未选型号，销售额前三型号为 ${topModels.map((row) => `${row.sku}（${formatMoney(row.salesAmount)}）`).join("、")}。`,
+    `型号维度整体销量 ${formatNumber(data.kpis.quantity)} 件，平均件单价 ${formatMoney(data.kpis.unitPrice)}。`,
+  ] : [];
 }
 
 function shareTitle(group: ShareGroup, value: ShareValue) {

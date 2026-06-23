@@ -1,6 +1,6 @@
 export type ChartMode = "line" | "area" | "bar";
 export type TrendMetric = "quantity" | "money" | "unitPrice" | "avgItemsPerOrder";
-export type DatePreset = "today" | "yesterday" | "week" | "last7" | "last30" | "month" | "lastMonth" | "quarter" | "year" | "custom";
+export type DatePreset = "today" | "last7" | "last30" | "lastMonth" | "year" | "all" | "custom";
 
 export type FactOrder = {
   orderId: string;
@@ -41,6 +41,7 @@ export type DimCountry = {
 export type DimProduct = {
   sku: string;
   productTitle: string;
+  launchDate?: string;
 };
 
 export type DimDate = {

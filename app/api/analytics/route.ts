@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
 
 export function filtersFromUrl(params: URLSearchParams): AnalyticsFilters {
   return {
-    preset: (params.get("preset") || "week") as DatePreset,
+    preset: (params.get("preset") || "last7") as DatePreset,
     start: params.get("start") || undefined,
     end: params.get("end") || undefined,
     countries: params.getAll("country"),

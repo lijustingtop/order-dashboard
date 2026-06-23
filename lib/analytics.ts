@@ -56,7 +56,7 @@ export async function getExportRows(filters: AnalyticsFilters, table: "sku" | "c
 
 function normalizeFilters(filters: AnalyticsFilters): AnalyticsFilters {
   return {
-    preset: filters.preset || "week",
+    preset: filters.preset || "last7",
     start: filters.start,
     end: filters.end,
     countries: [...new Set(filters.countries || [])].sort(),
@@ -141,8 +141,12 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
     analysis,
     drilldowns: buildDrilldowns(facts),
     dimensions: {
-      countries: buildCountryOptions(allFacts, filters, range),
-      products: [...groupBy(allFacts, (row) => row.model || row.sku).entries()].map(([sku, group]) => ({ sku, productTitle: sku || group[0]?.productTitle || sku })).sort((a, b) => a.sku.localeCompare(b.sku)),
+      countries: buildCountryOptions(visibleAllFacts, filters, range),
+      products: [...groupBy(visibleAllFacts, (row) => row.model || row.sku).entries()].map(([sku, group]) => ({
+        sku,
+        productTitle: sku || group[0]?.productTitle || sku,
+        launchDate: group.filter((row) => row.eventType === "sale").map((row) => row.orderDate || row.date).filter(Boolean).sort()[0],
+      })).sort((a, b) => a.sku.localeCompare(b.sku)),
       dates: [...new Set(allFacts.map((row) => row.date))].sort().map(dateDimension),
       weeks: buildWeekOptions(allFacts),
     },
@@ -381,12 +385,12 @@ function summarizeCustomers(facts: FactOrder[]): CustomerRankingRow[] {
 }
 
 function summarizeDiscounts(facts: FactOrder[]): DiscountDetailRow[] {
-  const salesFacts = facts.filter((row) => row.eventType === "sale" && (row.discountAmount || 0) > 0);
-  return [...groupBy(salesFacts, (row) => `${row.orderId}__${((row.discountCodes?.length ? row.discountCodes : ["自动折扣"])).join(",")}`).entries()].map(([, group]) => ({
+  const salesFacts = facts.filter((row) => row.eventType === "sale" && (row.discountAmount || 0) > 0 && (row.discountCodes?.length || 0) > 0);
+  return [...groupBy(salesFacts, (row) => `${row.orderId}__${(row.discountCodes || []).join(",")}`).entries()].map(([, group]) => ({
     orderId: group[0]?.orderId || "",
     date: group[0]?.orderDate || group[0]?.date || "",
     country: group[0]?.country || "未知",
-    code: [...new Set(group.flatMap((row) => row.discountCodes?.length ? row.discountCodes : ["自动折扣"]))].join(", "),
+    code: [...new Set(group.flatMap((row) => row.discountCodes || []))].join(", "),
     models: [...new Set(group.map((row) => row.model || row.sku))],
     salesAmount: sum(group, "salesAmount"),
     discountAmount: sum(group, "discountAmount"),
@@ -439,6 +443,7 @@ function summarizeOrderLineItems(facts: FactOrder[]) {
 function refundStatusText(status?: string): string {
   if (status === "REFUNDED") return "已退款";
   if (status === "PARTIALLY_REFUNDED") return "部分退款";
+  if (status === "PAID") return "换型号";
   return status || "已退款";
 }
 

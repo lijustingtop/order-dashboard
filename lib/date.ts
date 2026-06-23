@@ -43,22 +43,15 @@ export function parseShopifyDate(value: string): Date | null {
 export function resolveDateRange(preset: DatePreset, start?: string, end?: string, referenceDate?: string): { start: string; end: string } {
   const today = referenceDate ? parseDate(referenceDate) || new Date() : new Date();
   today.setHours(0, 0, 0, 0);
-  const yesterday = new Date(today.getTime() - DAY_MS);
 
   if (preset === "custom" && start && end) return { start, end };
+  if (preset === "all") return { start: "2025-01-01", end: formatDate(today) };
   if (preset === "today") return { start: formatDate(today), end: formatDate(today) };
-  if (preset === "yesterday") return { start: formatDate(yesterday), end: formatDate(yesterday) };
   if (preset === "last7") return { start: formatDate(new Date(today.getTime() - 6 * DAY_MS)), end: formatDate(today) };
   if (preset === "last30") return { start: formatDate(new Date(today.getTime() - 29 * DAY_MS)), end: formatDate(today) };
   if (preset === "year") return { start: formatDate(new Date(today.getFullYear(), 0, 1)), end: formatDate(today) };
-  if (preset === "quarter") {
-    const quarterStartMonth = Math.floor(today.getMonth() / 3) * 3;
-    return { start: formatDate(new Date(today.getFullYear(), quarterStartMonth, 1)), end: formatDate(today) };
-  }
-  if (preset === "month") return { start: formatDate(new Date(today.getFullYear(), today.getMonth(), 1)), end: formatDate(today) };
   if (preset === "lastMonth") return { start: formatDate(new Date(today.getFullYear(), today.getMonth() - 1, 1)), end: formatDate(new Date(today.getFullYear(), today.getMonth(), 0)) };
-  if (preset === "week") return thursdayWeekRange(today);
-  return thursdayWeekRange(today);
+  return { start: formatDate(new Date(today.getTime() - 6 * DAY_MS)), end: formatDate(today) };
 }
 
 export function previousRange(range: { start: string; end: string }): { start: string; end: string } {
