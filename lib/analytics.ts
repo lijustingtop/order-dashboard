@@ -37,8 +37,7 @@ export async function getAnalytics(filters: AnalyticsFilters): Promise<Analytics
   if (cached && cached.expiresAt > Date.now()) return { ...cached.value, cached: true };
 
   const facts = await loadFactOrders();
-  const latestDate = facts.reduce((latest, row) => row.date > latest ? row.date : latest, "");
-  const range = resolveDateRange(normalized.preset, normalized.start, normalized.end, latestDate);
+  const range = resolveDateRange(normalized.preset, normalized.start, normalized.end);
   const previous = previousRange(range);
   const previousYear = previousYearRange(range);
   const filtered = filterFacts(facts, normalized, range);
@@ -907,9 +906,8 @@ function ratio(a: number, b: number): number {
 
 function buildWeekOptions(facts: FactOrder[]) {
   const minDate = facts.reduce((min, row) => row.date && row.date < min ? row.date : min, "2025-01-01");
-  const maxDate = facts.reduce((max, row) => row.date > max ? row.date : max, "");
   const start = parseDate(minDate < "2025-01-01" ? "2025-01-01" : minDate) || new Date(2025, 0, 1);
-  const end = parseDate(maxDate) || new Date();
+  const end = new Date();
   start.setDate(start.getDate() - ((start.getDay() + 3) % 7));
   const weeks = [];
   for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 7)) {

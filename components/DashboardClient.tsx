@@ -13,6 +13,7 @@ const dateOptions: Array<{ value: DatePreset; label: string }> = [
   { value: "lastMonth", label: "上月" },
   { value: "year", label: "今年" },
   { value: "all", label: "全部数据" },
+  { value: "custom", label: "自定义" },
 ];
 
 const navItems = [
@@ -96,6 +97,7 @@ export default function DashboardClient() {
   const countryQuantityRows = buildRankRows(data, "country", "quantity");
   const modelSalesRows = buildRankRows(data, "model", "sales");
   const modelQuantityRows = buildRankRows(data, "model", "quantity");
+  const weekOptions = data?.dimensions.weeks ?? [];
   const selectedAccessoryAnalysis = buildSelectedAccessoryAnalysis(data, selectedModel);
   const viewTitle = selectedCountry && activeView === "countries" ? `${selectedCountry} Overview` : selectedModel && activeView === "products" ? `${selectedModel} Overview` : activeView === "countries" ? "国家分析" : activeView === "products" ? "型号分析" : activeView === "orders" ? "订单明细" : activeView === "customers" ? "客户排行" : activeView === "refunds" ? "退款分析" : activeView === "discounts" ? "优惠券明细" : "Overview";
 
@@ -138,10 +140,26 @@ export default function DashboardClient() {
           <div className="last-updated">Last updated: {data ? new Date(data.generatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "--"}</div>
         </header>
 
-        <section className="filter-row">
+        <section className={preset === "custom" ? "filter-row custom-date" : "filter-row"}>
           <select className="apple-field" value={preset} onChange={(event) => setPreset(event.target.value as DatePreset)}>
             {dateOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
+          <select className="apple-field week-field" value={preset === "custom" && start && end ? `${start}__${end}` : ""} onChange={(event) => {
+            const option = weekOptions.find((item) => item.key === event.target.value);
+            if (!option) return;
+            setPreset("custom");
+            setStart(option.start);
+            setEnd(option.end);
+          }}>
+            <option value="">周快捷选择</option>
+            {weekOptions.map((week) => <option key={week.key} value={week.key}>{week.label}</option>)}
+          </select>
+          {preset === "custom" ? (
+            <>
+              <input className="apple-field" type="date" value={start} onChange={(event) => setStart(event.target.value)} />
+              <input className="apple-field" type="date" value={end} onChange={(event) => setEnd(event.target.value)} />
+            </>
+          ) : null}
           <select className="apple-field" value={selectedCountry} onChange={(event) => {
             setCountries(event.target.value ? [event.target.value] : []);
             if (activeView === "countries") setModels([]);
@@ -158,6 +176,9 @@ export default function DashboardClient() {
           </select>
           <input className="apple-field search-field" placeholder="搜索订单 / 国家 / 型号" value={search} onChange={(event) => setSearch(event.target.value)} />
           <button className="reset-button" type="button" onClick={() => {
+            setPreset("last7");
+            setStart("");
+            setEnd("");
             setCountries([]);
             setModels([]);
             setSearch("");
