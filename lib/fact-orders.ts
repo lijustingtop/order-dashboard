@@ -99,13 +99,13 @@ type ShopifyRefundLineItemNode = {
   };
 };
 
-let factCache: { loadedAt: number; rows: FactOrder[] } | null = null;
+let factCache: { bulkId: string; loadedAt: number; rows: FactOrder[] } | null = null;
 
 export async function loadFactOrders(): Promise<FactOrder[]> {
-  if (factCache?.rows.length && Date.now() - factCache.loadedAt < 10 * 60_000) return factCache.rows;
-
   const operation = await currentBulkOperation();
   const bulk = operation.data?.currentBulkOperation;
+  if (bulk?.id && factCache?.bulkId === bulk.id && factCache.rows.length && Date.now() - factCache.loadedAt < 10 * 60_000) return factCache.rows;
+
   if (!bulk?.url) {
     if (!bulk || ["FAILED", "CANCELED", "EXPIRED"].includes(bulk.status)) {
       await startOrdersBulkOperation();
@@ -114,7 +114,7 @@ export async function loadFactOrders(): Promise<FactOrder[]> {
   }
 
   const rows = await loadFactsFromBulkUrl(bulk.url);
-  factCache = { loadedAt: Date.now(), rows };
+  factCache = { bulkId: bulk.id, loadedAt: Date.now(), rows };
   return rows;
 }
 
