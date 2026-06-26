@@ -18,6 +18,10 @@ export function formatDateInAnalyticsTimeZone(date: Date): string {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+export function todayInAnalyticsTimeZone(): string {
+  return formatDateInAnalyticsTimeZone(new Date());
+}
+
 export function formatChineseDate(value: string): string {
   const date = parseDate(value);
   if (!date) return value;
@@ -41,7 +45,7 @@ export function parseShopifyDate(value: string): Date | null {
 }
 
 export function resolveDateRange(preset: DatePreset, start?: string, end?: string, referenceDate?: string): { start: string; end: string } {
-  const today = referenceDate ? parseDate(referenceDate) || new Date() : new Date();
+  const today = referenceDate ? parseDate(referenceDate) || parseDate(todayInAnalyticsTimeZone()) || new Date() : parseDate(todayInAnalyticsTimeZone()) || new Date();
   today.setHours(0, 0, 0, 0);
 
   if (preset === "custom" && start && end) return { start, end };

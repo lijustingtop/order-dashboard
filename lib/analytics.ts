@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { dateDimension, formatChineseDate, formatDateInAnalyticsTimeZone, inRange, parseDate, previousRange, previousYearRange, resolveDateRange, weekOption } from "@/lib/date";
+import { dateDimension, formatChineseDate, formatDateInAnalyticsTimeZone, inRange, parseDate, previousRange, previousYearRange, resolveDateRange, todayInAnalyticsTimeZone, weekOption } from "@/lib/date";
 import { loadFactOrders, normalizeSku } from "@/lib/fact-orders";
 import { niceScale } from "@/lib/nice-scale";
 import { shopifyqlQuery } from "@/lib/shopify";
@@ -907,7 +907,7 @@ function ratio(a: number, b: number): number {
 function buildWeekOptions(facts: FactOrder[]) {
   const minDate = facts.reduce((min, row) => row.date && row.date < min ? row.date : min, "2025-01-01");
   const start = parseDate(minDate < "2025-01-01" ? "2025-01-01" : minDate) || new Date(2025, 0, 1);
-  const end = new Date();
+  const end = parseDate(todayInAnalyticsTimeZone()) || new Date();
   start.setDate(start.getDate() - ((start.getDay() + 3) % 7));
   const weeks = [];
   for (const cursor = new Date(start); cursor <= end; cursor.setDate(cursor.getDate() + 7)) {

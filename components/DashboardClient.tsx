@@ -5,6 +5,7 @@ import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
 import type { AnalyticsResponse, ChartMode, DatePreset, TrendMetric, TrendPoint } from "@/types/analytics";
 
 const ReactECharts = dynamic(() => import("echarts-for-react"), { ssr: false });
+const ANALYTICS_TIME_ZONE = "America/New_York";
 
 const dateOptions: Array<{ value: DatePreset; label: string }> = [
   { value: "today", label: "今天" },
@@ -137,7 +138,7 @@ export default function DashboardClient() {
             {selectedModel && selectedProduct?.launchDate ? <p className="launch-date">上线日期：{selectedProduct.launchDate}</p> : null}
             <h1>{viewTitle}</h1>
           </div>
-          <div className="last-updated">Last updated: {data ? new Date(data.generatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "--"}</div>
+          <div className="last-updated">Last updated: {data ? `${new Date(data.generatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", timeZone: ANALYTICS_TIME_ZONE })} ET` : "--"}</div>
         </header>
 
         <section className={preset === "custom" ? "filter-row custom-date" : "filter-row"}>
