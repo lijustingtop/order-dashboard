@@ -75,7 +75,7 @@ function filterFacts(facts: FactOrder[], filters: AnalyticsFilters, range: { sta
     if (!inRange(row.date, range.start, range.end)) return false;
     if (countrySet.size && !countrySet.has(row.country)) return false;
     if (skuSet.size && !skuSet.has(row.model || row.sku)) return false;
-    if (search && !`${row.model || ""} ${row.sku} ${row.productTitle} ${row.country}`.toLowerCase().includes(search)) return false;
+    if (search && !`${row.orderId} ${row.model || ""} ${row.sku} ${row.productTitle} ${row.country} ${row.customerEmail || ""}`.toLowerCase().includes(search)) return false;
     return true;
   });
 }
