@@ -91,8 +91,9 @@ async function buildAnalyticsResponse(facts: FactOrder[], previousPeriodFacts: F
     summarizeShopifyqlSalesSummary(range),
   ]);
   const refundRows = shopifyqlRefundReport.rows.length ? await summarizeShopifyqlRefundRows(shopifyqlRefundReport.rows, fallbackRefundRows, allFacts) : fallbackRefundRows;
-  const kpis = summarizeKpis(facts, shopifyqlRefundReport.totalRefundAmount || undefined, shopifyqlSalesSummary);
-  const trend = applyShopifyqlRefundsToTrend(summarizeTrend(visibleFacts), shopifyqlRefundReport.rows);
+  const hasFactFilters = Boolean(filters.search) || Boolean(filters.countries?.length) || Boolean(filters.skus?.length);
+  const kpis = summarizeKpis(facts, hasFactFilters ? undefined : shopifyqlRefundReport.totalRefundAmount || undefined, hasFactFilters ? undefined : shopifyqlSalesSummary);
+  const trend = hasFactFilters ? summarizeTrend(visibleFacts) : applyShopifyqlRefundsToTrend(summarizeTrend(visibleFacts), shopifyqlRefundReport.rows);
   const previousPeriodTrend = summarizeTrend(visiblePreviousPeriodFacts);
   const previousYearTrend = summarizeTrend(visiblePreviousYearFacts);
   const skuRows = summarizeSku(visibleFacts);
